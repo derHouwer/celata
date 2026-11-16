@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/derHouwer/celata/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.
+  - name: Problems with the hide.me client itself
+    url: https://github.com/eventure/hide.client.linux/issues
+    about: Celata is only the graphical interface. Problems of the VPN client belong to its own project.

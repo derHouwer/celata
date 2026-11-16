@@ -1,0 +1,51 @@
+#!/usr/bin/make -f
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 derHouwer
+#
+# Builds Celata without network access against the vendored crates in ./vendor (see docs/packaging.md).
+# Rust is not a build dependency of this package: Debian 13 and Ubuntu 24.04 ship a Rust that is too old,
+# so `cargo` comes from rustup and must be on the PATH.
+
+export CARGO_HOME := $(CURDIR)/debian/cargo-home
+export CARGO_TARGET_DIR := $(CURDIR)/target
+CARGO_FLAGS := --release --locked --offline
+
+%:
+	dh $@ --with installsysusers
+
+override_dh_auto_configure:
+	mkdir -p $(CARGO_HOME)
+	printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "%s/vendor"\n' "$(CURDIR)" > $(CARGO_HOME)/config.toml
+
+override_dh_auto_build:
+	cargo build $(CARGO_FLAGS)
+
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	cargo test $(CARGO_FLAGS)
+endif
+
+override_dh_auto_install:
+	install -D -m 0755 target/release/celata debian/celata/usr/bin/celata
+
+# Ubuntu's debhelper leaves upstream changelogs out; install it under the name Debian expects.
+execute_after_dh_installchangelogs:
+	install -D -m 0644 CHANGELOG.md debian/celata/usr/share/doc/celata/changelog
+
+# The unit and the group definition live once in packaging/; debhelper wants them under debian/.
+execute_before_dh_installsysusers:
+	cp packaging/sysusers/celata.conf debian/celata.sysusers
+
+execute_before_dh_installsystemd:
+	cp packaging/systemd/celata-hide.me.service debian/celata.celata-hide.me.service
+
+# Installing never starts or enables the service; updating never stops or restarts it.
+override_dh_installsystemd:
+	dh_installsystemd --name=celata-hide.me --no-enable --no-start --no-restart-after-upgrade --no-stop-on-upgrade
+
+override_dh_auto_clean:
+	rm -rf target debian/cargo-home debian/celata.sysusers debian/celata.celata-hide.me.service
+
+# dh_clean would delete the *.orig files of the vendored crates, and cargo then rejects their checksums.
+override_dh_clean:
+	dh_clean -Xvendor/

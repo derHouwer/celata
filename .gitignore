@@ -1,0 +1,23 @@
+# Rust build output (Cargo.lock is versioned on purpose)
+/target/
+
+# Built packages (packaging/build-packages.sh)
+/dist/
+
+# Credentials and keys must never get into the repository
+accessToken.txt
+*.token
+*.key
+*.pem
+.env
+.env.*
+
+# Editor and system
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Rust and logs
+*.rs.bk
+*.log

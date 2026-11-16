@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 derHouwer
+
+[Desktop Entry]
+Type=Application
+Name=Celata
+Comment=Graphical interface for the hide.me VPN client
+Comment[de]=Grafische Oberfläche für den hide.me-VPN-Client
+Exec=celata
+Icon=celata
+Terminal=false
+Categories=Network;
+StartupWMClass=celata

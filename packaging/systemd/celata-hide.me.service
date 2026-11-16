@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 derHouwer
+#
+# hide.me in "service" mode with a protected control socket for Celata.
+#
+# In this mode the hide.me client only waits for commands on the socket. It never connects on its own, not
+# even when this unit is enabled to start at boot.
+# The hardening options follow the hide.me@.service shipped with the hide.me client (v0.9.14), and further
+# options are set at the end of [Service].
+#
+# Write access to /etc is the same as in the unit of the client and cannot be narrowed to /etc/resolv.conf:
+# the system replaces that file with a new one whenever the network changes, and access granted to the
+# single file is lost at that moment. The client then fails to connect ("read-only file system").
+
+[Unit]
+Description=hide.me VPN service for Celata
+Wants=network-online.target
+After=network-online.target
+DefaultDependencies=yes
+
+[Service]
+Type=notify
+WorkingDirectory=/opt/hide.me
+RuntimeDirectory=hide.me
+RuntimeDirectoryMode=0755
+ExecStart=/opt/hide.me/hide.me --caddr /run/hide.me/control.sock service
+ExecStartPost=/usr/bin/chgrp celata /run/hide.me/control.sock
+ExecStartPost=/usr/bin/chmod 0660 /run/hide.me/control.sock
+ReadWritePaths=/opt/hide.me /etc -/run/systemd/resolve
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+PrivateTmp=true
+PrivateDevices=no
+SystemCallArchitectures=native
+SystemCallFilter=~@module
+SystemCallFilter=~@mount
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+MemoryMax=64M
+User=root
+Group=root
+LimitNOFILE=64
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

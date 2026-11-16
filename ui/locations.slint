@@ -1,0 +1,310 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 derHouwer
+
+// View "Locations": search, tabs "Standard" and "Streaming", list and bar for connecting.
+
+import { LineEdit, ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Card, Flag, PrimaryButton, SecondaryButton, Tabs, Toggle } from "widgets.slint";
+
+// A row of the location list. The contents come from `src/look.rs` (`LocationRow`), the flag from the
+// image cache in `src/main.rs`; without a flag `flag` stays empty.
+export struct ServerRow {
+    flag: image,
+    country: string,
+    place: string,
+    host: string,
+    free: bool,
+    // Text for the selected location, for example "Australia, Melbourne"
+    choice: string,
+}
+
+// A list of locations: a click selects, a double click connects or switches.
+// Used for both tabs, so that the handling does not differ.
+component ServerList inherits VerticalLayout {
+    in property <[ServerRow]> rows;
+    in property <bool> can-connect;
+    // While connected: switching to a server other than the connected one is possible
+    in property <bool> can-switch;
+    in property <string> connected-host;
+    // Show "No results" if the list is empty
+    in property <bool> show-empty;
+    in-out property <string> selected-host;
+    in-out property <string> selected-name;
+    callback connect(string);
+    callback selection-changed(string);
+    spacing: 8px;
+
+    if root.show-empty && root.rows.length == 0: Text {
+        text: @tr("No results");
+        color: Theme.text-soft;
+    }
+
+    ListView {
+        vertical-stretch: 1;
+        min-height: 104px;
+
+        // All rows have the same height: the list estimates its total height from the visible rows.
+        // With differing heights the scroll bar would not follow the mouse pointer.
+        for row in root.rows: Rectangle {
+            height: 52px;
+            background: row.host == root.selected-host
+                ? Theme.row-selected
+                : touch.has-hover ? Theme.row-hover : Theme.card;
+
+            touch := TouchArea {
+                clicked => {
+                    root.selected-host = row.host;
+                    root.selected-name = row.choice;
+                    root.selection-changed(row.host);
+                }
+                double-clicked => {
+                    root.selected-host = row.host;
+                    root.selected-name = row.choice;
+                    root.selection-changed(row.host);
+                    if (root.can-connect || (root.can-switch && row.host != root.connected-host)) {
+                        root.connect(row.host);
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 12px;
+
+                VerticalLayout {
+                    alignment: center;
+                    Flag {
+                        source: row.flag;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+
+                    Text {
+                        text: row.country;
+                        font-size: Theme.country;
+                        font-weight: 600;
+                        color: Theme.text;
+                        overflow: elide; // may be cut: row of a list, the full name is shown in the overview
+                    }
+
+                    Text {
+                        text: row.place;
+                        font-size: Theme.place;
+                        color: Theme.text-soft;
+                        overflow: elide; // may be cut: row of a list, the full name is shown in the overview
+                    }
+                }
+
+                if row.free: Text {
+                    text: @tr("free");
+                    font-size: 12px;
+                    color: Theme.free-text;
+                    horizontal-stretch: 0;
+                    vertical-alignment: center;
+                }
+
+                if row.host == root.connected-host: VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+
+                    Rectangle {
+                        height: 20px;
+                        min-width: badge.preferred-width + 16px;
+                        border-radius: 10px;
+                        background: Theme.accent;
+
+                        badge := Text {
+                            text: @tr("Connected");
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: Theme.on-dark;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component LocationsView inherits VerticalLayout {
+    in property <[ServerRow]> servers;
+    in property <[ServerRow]> streaming-servers;
+    // "loading", "ready" or "error"
+    in property <string> list-state;
+    in property <string> list-message;
+    in property <bool> can-connect;
+    in property <bool> connecting;
+    in property <bool> can-disconnect;
+    in property <bool> can-switch;
+    in property <string> connected-host;
+    in property <bool> switching;
+    in-out property <string> search-text;
+    in-out property <string> selected-host;
+    in-out property <string> selected-name;
+    // Selected tab, remembered in the window so that it is kept when the view changes
+    in-out property <int> tab;
+    // "Free only" in the tab "Standard"; Rust filters the list
+    in-out property <bool> free-only;
+
+    callback search-changed(string);
+    callback reload-servers();
+    callback connect(string);
+    callback disconnect();
+    callback selection-changed(string);
+    callback free-only-changed(bool);
+
+    spacing: 16px;
+
+    Text {
+        text: @tr("All locations");
+        font-size: Theme.page-title;
+        font-weight: 600;
+        color: Theme.text;
+    }
+
+    Card {
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+
+            // Search across both tabs
+            LineEdit {
+                placeholder-text: @tr("Search country, city or server");
+                text <=> root.search-text;
+                edited(text) => {
+                    root.search-changed(text);
+                }
+            }
+
+            Tabs {
+                labels: [@tr("Standard"), @tr("Streaming")];
+                current <=> root.tab;
+            }
+
+            if root.tab == 0: VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 8px;
+
+                Toggle {
+                    text: @tr("Free only");
+                    checked: root.free-only;
+                    toggled(on) => {
+                        root.free-only = on;
+                        root.free-only-changed(on);
+                    }
+                }
+
+                if root.list-message != "": Text {
+                    text: root.list-message;
+                    wrap: word-wrap;
+                    font-size: 12px;
+                    color: root.list-state == "error" ? Theme.tone-alert : Theme.text-soft;
+                }
+
+                if root.list-state == "loading": Text {
+                    text: @tr("Loading server list …");
+                    color: Theme.text-soft;
+                }
+
+                if root.list-state == "error": HorizontalLayout {
+                    alignment: start;
+                    SecondaryButton {
+                        text: @tr("Try again");
+                        clicked => {
+                            root.reload-servers();
+                        }
+                    }
+                }
+
+                ServerList {
+                    vertical-stretch: 1;
+                    rows: root.servers;
+                    can-connect: root.can-connect;
+                    can-switch: root.can-switch;
+                    connected-host: root.connected-host;
+                    show-empty: root.list-state == "ready";
+                    selected-host <=> root.selected-host;
+                    selected-name <=> root.selected-name;
+                    connect(host) => {
+                        root.connect(host);
+                    }
+                    selection-changed(host) => {
+                        root.selection-changed(host);
+                    }
+                }
+            }
+
+            if root.tab == 1: VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 8px;
+
+                // Note from a test with the real service: some destinations do not work through streaming servers
+                Text {
+                    text: @tr("Intended for streaming. Some websites do not work through these servers.");
+                    wrap: word-wrap;
+                    font-size: 12px;
+                    color: Theme.text-soft;
+                }
+
+                ServerList {
+                    vertical-stretch: 1;
+                    rows: root.streaming-servers;
+                    can-connect: root.can-connect;
+                    can-switch: root.can-switch;
+                    connected-host: root.connected-host;
+                    show-empty: true;
+                    selected-host <=> root.selected-host;
+                    selected-name <=> root.selected-name;
+                    connect(host) => {
+                        root.connect(host);
+                    }
+                    selection-changed(host) => {
+                        root.selection-changed(host);
+                    }
+                }
+            }
+        }
+    }
+
+    // Connect: while connected, "Disconnect" and "Connect" are next to each other.
+    HorizontalLayout {
+        spacing: 10px;
+
+        Text {
+            text: root.selected-host == "" ? @tr("No server selected") : @tr("Selected: {}", root.selected-name);
+            color: Theme.text-soft;
+            vertical-alignment: center;
+            // Wrap instead of cutting.
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+
+        if root.can-disconnect: SecondaryButton {
+            text: @tr("Disconnect");
+            clicked => {
+                root.disconnect();
+            }
+        }
+
+        PrimaryButton {
+            icon-field: false;
+            min-width: 150px;
+            horizontal-stretch: 0;
+            text: root.switching ? @tr("Switching …") : root.connecting ? @tr("Connecting …") : @tr("Connect");
+            enabled: root.selected-host != ""
+                && (root.can-connect || (root.can-switch && root.selected-host != root.connected-host));
+            clicked => {
+                root.connect(root.selected-host);
+            }
+        }
+    }
+}

@@ -1,0 +1,30 @@
+[
+  {"id": 1, "hostname": "nl-v4.hideservers.net", "flag": "nl", "displayName": "Netherlands",
+   "geo": {"lat": 52.37, "lon": 4.89, "cityName": "Amsterdam", "countryCode": "NL", "continent": "EU"},
+   "tags": ["upgrade", "10g"]},
+  {"id": 2, "hostname": "de-v4.hideservers.net", "flag": "de", "displayName": "Germany",
+   "geo": {"countryCode": "DE", "continent": "EU"}, "tags": ["upgrade", "no-ping"],
+   "children": [
+     {"id": 21, "hostname": "frankfurt-v4.hideservers.net", "flag": "de", "displayName": "Frankfurt",
+      "geo": {"cityName": "Frankfurt", "countryCode": "DE", "continent": "EU"}, "tags": ["upgrade"]},
+     {"id": 22, "hostname": "berlin-v4.hideservers.net", "flag": "de", "displayName": "Berlin",
+      "geo": {"cityName": "Berlin", "countryCode": "DE", "continent": "EU"}, "tags": ["upgrade", "10g"]},
+     {"id": 23, "hostname": "boese-v4.example.org", "flag": "de", "displayName": "Fremde Domain",
+      "geo": {"cityName": "Nirgendwo", "countryCode": "DE"}, "tags": []}
+   ]},
+  {"id": 3, "hostname": "au-v4.hideservers.net", "flag": "au", "displayName": "Australia",
+   "geo": {"countryCode": "AU", "continent": "OC"}, "tags": ["upgrade", "non-p2p"],
+   "children": [
+     {"id": 31, "hostname": "melbourne-v4.hideservers.net", "flag": "au", "displayName": "Melbourne",
+      "geo": {"cityName": "Melbourne", "countryCode": "AU"}, "tags": ["upgrade"]},
+     {"id": 32, "hostname": "perth-v4.hideservers.net", "flag": "au", "displayName": "Perth",
+      "geo": {"cityName": "Perth", "countryCode": "AU"}, "tags": ["upgrade"]}
+   ]},
+  {"id": 4, "hostname": "free-de-v4.hideservers.net", "flag": "de", "displayName": "Germany - Free",
+   "geo": {"cityName": "Frankfurt", "countryCode": "DE", "continent": "EU"}, "tags": ["free"]},
+  {"id": 5, "hostname": "auckland-v4.hideservers.net", "flag": "nz", "displayName": "New Zealand",
+   "geo": {"cityName": "Auckland", "countryCode": "NZ", "continent": "OC"}, "tags": ["upgrade"]},
+  {"id": 6, "hostname": "nl2-v4.hideservers.net", "flag": "nl",
+   "geo": {"countryCode": "NL"}, "tags": []},
+  {"id": 7, "hostname": "ohne-land-v4.hideservers.net", "displayName": "Ohne Land", "tags": []}
+]

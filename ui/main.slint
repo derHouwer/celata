@@ -1,0 +1,582 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 derHouwer
+
+// User interface of Celata. Do not use logos or graphics of hide.me.
+// The texts come from `src/state.rs`, `src/servers.rs` and `src/look.rs`; only the presentation is here.
+// Colours are only in `theme.slint`.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import {
+    Card, CommandBox, ConfirmDialog, DonationCard, DonationTexts, NavItem, PrimaryButton, SecondaryButton, StatusDot,
+    Toast,
+} from "widgets.slint";
+import { LocationsView, ServerRow } from "locations.slint";
+import { DetailsRow, HintRow, OverviewView } from "overview.slint";
+import { CategoryRow, SettingsErrors, SettingsForm, SettingsView } from "settings.slint";
+
+// `src/main.rs` needs the types as `celata_ui::…`.
+export { ServerRow, SettingsForm, SettingsErrors, CategoryRow, HintRow, DetailsRow, DonationTexts }
+
+// Question before applying (`confirm`)
+export struct ConfirmRow {
+    open: bool,
+    title: string,
+    text: string,
+    danger: bool,
+    ok-label: string,
+}
+
+export component MainWindow inherits Window {
+    title: "Celata";
+    icon: @image-url("icons/celata.svg");
+    preferred-width: 880px;
+    // High enough that the card "Connection" is visible without scrolling while connected
+    preferred-height: 780px;
+    min-width: 640px;
+    min-height: 520px;
+    // Fixed light surface, so that the colours stay readable with a dark system theme as well
+    background: Theme.surface;
+
+    // Visible view: "overview", "locations" or "settings"
+    in-out property <string> page: "overview";
+    // Selected tab in "Locations": 0 = Standard, 1 = Streaming
+    in-out property <int> locations-tab: 0;
+    // "Free only" in the tab "Standard"
+    in-out property <bool> free-only;
+    callback free-only-changed(bool);
+
+    // State, set from `src/main.rs`
+    // Rust sets the text before the first picture in the stored language (`apply_language`).
+    in property <string> status-title;
+    // Short version for the sidebar: for "Switching to …" without the host name in brackets.
+    in property <string> status-short;
+    in property <string> status-text;
+    in property <string> server;
+    in property <string> detail;
+    in property <string> notice;
+    in property <string> version-warning;
+    in property <string> command;
+    in property <bool> warning;
+    in property <bool> can-connect;
+    in property <bool> connecting;
+    in property <bool> can-disconnect;
+    in property <bool> can-switch;
+    in property <string> connected-host;
+    in property <bool> switching;
+
+    // From `src/look.rs`
+    in property <string> tone: "idle";
+    in property <string> main-label;
+    in property <string> main-action: "none";
+    // Right area of the main button: "route", "unblock" or "none"
+    in property <string> main-side: "none";
+    in property <string> main-side-label;
+    in property <string> location-label;
+    in property <image> location-flag;
+
+    // Unblock internet
+    in property <bool> unblock-asked;
+    in property <string> unblock-warning;
+
+    // Question on closing
+    in-out property <bool> dialog-open;
+    in property <string> dialog-text;
+    in property <bool> dialog-offers-disconnect;
+    in property <string> dialog-keep-label;
+    in property <string> dialog-command;
+
+    // Server list
+    in property <[ServerRow]> servers;
+    // Streaming servers, set from `src/main.rs` according to `src/streaming.rs`
+    in property <[ServerRow]> streaming-servers;
+    // "loading", "ready" or "error"
+    in property <string> list-state: "loading";
+    in property <string> list-message;
+    in-out property <string> search-text;
+    in-out property <string> selected-host;
+    in-out property <string> selected-name;
+
+    // Settings
+    in property <SettingsForm> settings;
+    in property <SettingsErrors> settings-errors;
+    in property <string> settings-state;
+    in property <string> settings-file-notice;
+    in property <[CategoryRow]> categories;
+    in property <[CategoryRow]> blocked-categories;
+    in property <string> categories-state: "loading";
+    in property <string> categories-message;
+    in property <bool> filters-available;
+    in property <ConfirmRow> confirm;
+    in property <string> toast;
+    // Hints for the overview from `settings::active_hints`
+    in property <[HintRow]> hints;
+    // Connection details and public address
+    in property <DetailsRow> details;
+    // "Block internet": without a question, through the right area of the main button
+    in property <string> route-hint;
+    callback route-request();
+    // The info message reports that something was not applied (red stripe)
+    in property <bool> toast-alert;
+
+    // Donation hint. `src/main.rs` sets the texts from the keys `Donation…` in `src/i18n`.
+    in property <bool> donation-hint: true;
+    // Language: selection from `Language::ALL`, code of the language in force; the callback only
+    // reports the code that was clicked.
+    in property <[string]> language-names;
+    in property <int> language-index;
+    callback language-chosen(int);
+    // Link for copying in the info message if the browser could not be opened
+    in property <string> toast-link;
+    // Rust sets all texts before the first picture in the stored language (`apply_language`).
+    in property <DonationTexts> donation-texts;
+    callback donate();
+    // Switch "Show donation hint" toggled; Rust saves and sets `donation-hint`
+    callback donation-hint-toggled(bool);
+
+    callback setting-toggled(string, bool);
+    callback setting-choice(string, string);
+    callback setting-text(string, string);
+    callback list-add(string, string);
+    callback list-remove(string, int);
+    callback settings-reset(string);
+    callback open-more-filters();
+    callback category-search(string);
+    callback confirm-ok();
+    callback confirm-cancel();
+
+    callback search-changed(string);
+    callback reload-servers();
+    callback connect(string);
+    callback disconnect();
+    callback close-disconnect();
+    callback close-keep();
+    callback unblock-request();
+    callback unblock-confirm();
+    callback unblock-cancel();
+    // Selection in the list changed: Rust sets the location of the overview anew
+    callback selection-changed(string);
+    // Only in the user interface: open "Locations"
+    callback open-locations();
+    open-locations => {
+        root.page = "locations";
+    }
+
+    VerticalLayout {
+        // --- Header ---
+        Rectangle {
+            height: 44px;
+            background: Theme.topbar;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                spacing: 10px;
+                alignment: start;
+
+                VerticalLayout {
+                    alignment: center;
+                    Image {
+                        source: @image-url("icons/celata.svg");
+                        width: 24px;
+                        height: 24px;
+                        accessible-role: none;
+                    }
+                }
+
+                Text {
+                    text: "Celata";
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: Theme.on-dark;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            vertical-stretch: 1;
+
+            // --- Sidebar ---
+            Rectangle {
+                width: 200px;
+                background: Theme.sidebar;
+
+                VerticalLayout {
+                    padding-top: 12px;
+
+                    NavItem {
+                        text: @tr("Overview");
+                        icon: @image-url("icons/house.svg");
+                        selected: root.page == "overview";
+                        clicked => {
+                            root.page = "overview";
+                        }
+                    }
+
+                    NavItem {
+                        text: @tr("Locations");
+                        icon: @image-url("icons/map-pin.svg");
+                        selected: root.page == "locations";
+                        clicked => {
+                            root.page = "locations";
+                        }
+                    }
+
+                    NavItem {
+                        text: @tr("Settings");
+                        icon: @image-url("icons/settings.svg");
+                        selected: root.page == "settings";
+                        clicked => {
+                            root.page = "settings";
+                        }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                    }
+
+                    // Donation hint above the state. The distance below results from the padding of the
+                    // state.
+                    if root.donation-hint: VerticalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+
+                        DonationCard {
+                            title: root.donation-texts.card-title;
+                            text: root.donation-texts.card-text;
+                            button: root.donation-texts.button;
+                            button-label: root.donation-texts.button-label;
+                            donate => {
+                                root.donate();
+                            }
+                        }
+                    }
+
+                    // State visible in every view. The text wraps freely and is never cut; with several
+                    // lines the dot stands next to the first one. The sidebar shows the short version
+                    // without the host name in brackets (`status-short`), the overview shows the full
+                    // title.
+                    HorizontalLayout {
+                        padding: 16px;
+                        spacing: 10px;
+
+                        VerticalLayout {
+                            alignment: start;
+                            padding-top: 1px;
+                            StatusDot {
+                                tone: root.tone;
+                            }
+                        }
+
+                        Text {
+                            text: root.status-short;
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: Theme.on-dark;
+                            wrap: word-wrap;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+            }
+
+            // --- Content area ---
+            Rectangle {
+                horizontal-stretch: 1;
+
+                if root.page == "overview": ScrollView {
+                    VerticalLayout {
+                        padding: 24px;
+
+                        OverviewView {
+                            status-title: root.status-title;
+                            status-text: root.status-text;
+                            server: root.server;
+                            detail: root.detail;
+                            notice: root.notice;
+                            version-warning: root.version-warning;
+                            command: root.command;
+                            warning: root.warning;
+                            tone: root.tone;
+                            switching: root.switching;
+                            can-disconnect: root.can-disconnect;
+                            selected-host: root.selected-host;
+                            main-label: root.main-label;
+                            main-action: root.main-action;
+                            location-label: root.location-label;
+                            location-flag: root.location-flag;
+                            hints: root.hints;
+                            details: root.details;
+                            main-side: root.main-side;
+                            main-side-label: root.main-side-label;
+                            // The only combination in the user interface: state and settings live in Rust
+                            // behind separate locks.
+                            side-available: root.main-side != "route" || root.settings.kill-switch;
+                            route-hint: root.route-hint;
+                            route-request => {
+                                root.route-request();
+                            }
+                            unblock-request => {
+                                root.unblock-request();
+                            }
+                            connect(host) => {
+                                root.connect(host);
+                            }
+                            disconnect => {
+                                root.disconnect();
+                            }
+                            open-locations => {
+                                root.open-locations();
+                            }
+                        }
+                    }
+                }
+
+                // Usable in every state, even without a running service
+                if root.page == "settings": ScrollView {
+                    VerticalLayout {
+                        padding: 24px;
+
+                        SettingsView {
+                            settings: root.settings;
+                            errors: root.settings-errors;
+                            state: root.settings-state;
+                            file-notice: root.settings-file-notice;
+                            categories: root.categories;
+                            blocked-categories: root.blocked-categories;
+                            categories-state: root.categories-state;
+                            categories-message: root.categories-message;
+                            filters-available: root.filters-available;
+                            donation-hint: root.donation-hint;
+                            donation-texts: root.donation-texts;
+                            language-names: root.language-names;
+                            language-index: root.language-index;
+                            language-chosen(index) => {
+                                root.language-chosen(index);
+                            }
+                            donation-hint-toggled(on) => {
+                                root.donation-hint-toggled(on);
+                            }
+                            donate => {
+                                root.donate();
+                            }
+                            setting-toggled(key, on) => {
+                                root.setting-toggled(key, on);
+                            }
+                            setting-choice(key, value) => {
+                                root.setting-choice(key, value);
+                            }
+                            setting-text(key, value) => {
+                                root.setting-text(key, value);
+                            }
+                            list-add(key, value) => {
+                                root.list-add(key, value);
+                            }
+                            list-remove(key, index) => {
+                                root.list-remove(key, index);
+                            }
+                            settings-reset(section) => {
+                                root.settings-reset(section);
+                            }
+                            open-more-filters => {
+                                root.open-more-filters();
+                            }
+                            category-search(text) => {
+                                root.category-search(text);
+                            }
+                        }
+                    }
+                }
+
+                if root.page == "locations": VerticalLayout {
+                    padding: 24px;
+
+                    LocationsView {
+                        servers: root.servers;
+                        streaming-servers: root.streaming-servers;
+                        list-state: root.list-state;
+                        list-message: root.list-message;
+                        can-connect: root.can-connect;
+                        connecting: root.connecting;
+                        can-disconnect: root.can-disconnect;
+                        can-switch: root.can-switch;
+                        connected-host: root.connected-host;
+                        switching: root.switching;
+                        search-text <=> root.search-text;
+                        selected-host <=> root.selected-host;
+                        selected-name <=> root.selected-name;
+                        tab <=> root.locations-tab;
+                        free-only <=> root.free-only;
+                        free-only-changed(on) => {
+                            root.free-only-changed(on);
+                        }
+                        search-changed(text) => {
+                            root.search-changed(text);
+                        }
+                        reload-servers => {
+                            root.reload-servers();
+                        }
+                        connect(host) => {
+                            root.connect(host);
+                        }
+                        disconnect => {
+                            root.disconnect();
+                        }
+                        selection-changed(host) => {
+                            root.selection-changed(host);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Info message ---
+    // Floats at the bottom above the content area, so that it is visible at every scroll position.
+    if root.toast != "": Toast {
+        width: min(root.width - 200px - 48px, 560px);
+        x: 200px + (root.width - 200px - self.width) / 2;
+        y: root.height - self.height - 24px;
+        text: root.toast;
+        alert: root.toast-alert;
+        link: root.toast-link;
+    }
+
+    // --- Question before applying a setting ---
+    if root.confirm.open: ConfirmDialog {
+        title: root.confirm.title;
+        text: root.confirm.text;
+        danger: root.confirm.danger;
+        ok-label: root.confirm.ok-label;
+        ok => {
+            root.confirm-ok();
+        }
+        cancel => {
+            root.confirm-cancel();
+        }
+    }
+
+    // --- Question on closing ---
+    if root.dialog-open: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Theme.scrim;
+
+        // Catch clicks on the window behind
+        TouchArea { }
+
+        Card {
+            width: min(parent.width - 32px, 420px);
+            height: dialog-layout.preferred-height;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Theme.shadow-dialog;
+
+            dialog-layout := VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+
+                Text {
+                    text: @tr("Close Celata?");
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: Theme.text;
+                }
+
+                Text {
+                    text: root.dialog-text;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    color: Theme.text;
+                }
+
+                if root.dialog-command != "": CommandBox {
+                    command: root.dialog-command;
+                }
+
+                VerticalLayout {
+                    spacing: 8px;
+
+                    if root.dialog-offers-disconnect: PrimaryButton {
+                        text: @tr("Disconnect and close");
+                        icon-field: false;
+                        clicked => {
+                            root.close-disconnect();
+                        }
+                    }
+
+                    SecondaryButton {
+                        text: root.dialog-keep-label;
+                        clicked => {
+                            root.close-keep();
+                        }
+                    }
+
+                    SecondaryButton {
+                        text: @tr("Cancel");
+                        clicked => {
+                            root.dialog-open = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Warning before unblocking the internet ---
+    if root.unblock-asked: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Theme.scrim;
+
+        TouchArea { }
+
+        Card {
+            width: min(parent.width - 32px, 420px);
+            height: unblock-layout.preferred-height;
+            border-width: 2px;
+            border-color: Theme.tone-alert;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Theme.shadow-dialog;
+
+            unblock-layout := VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+
+                Text {
+                    text: @tr("Unblock internet?");
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: Theme.tone-alert;
+                }
+
+                Text {
+                    text: root.unblock-warning;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    color: Theme.text;
+                }
+
+                VerticalLayout {
+                    spacing: 8px;
+
+                    SecondaryButton {
+                        text: @tr("Unblock internet");
+                        danger: true;
+                        clicked => {
+                            root.unblock-confirm();
+                        }
+                    }
+
+                    PrimaryButton {
+                        text: @tr("Cancel");
+                        icon-field: false;
+                        clicked => {
+                            root.unblock-cancel();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

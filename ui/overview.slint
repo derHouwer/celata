@@ -1,0 +1,442 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 derHouwer
+
+// View "Overview": status card, location, main button.
+// There is only the one main button; its right, red area blocks the internet or lifts the block.
+// The colour of the dot and the text and effect of the main button come finished from `src/look.rs`.
+
+import { Theme } from "theme.slint";
+import { Card, CommandBox, Flag, MainButton, SecondaryButton, StatusDot } from "widgets.slint";
+
+// Permanent hint about settings that reduce the protection
+export struct HintRow {
+    text: string,
+    // Red: kill switch off
+    alert: bool,
+}
+
+// Connection details from `src/look.rs` (`ConnectionDetails`, `ExternalIp`). Duration, amount of data, VPN
+// address and DNS servers only in "Connected"; Celata determines the public address itself.
+export struct DetailsRow {
+    duration: string,
+    received: string,
+    sent: string,
+    address-v4: string,
+    address-v6: string,
+    dns-v4: string,
+    dns-v6: string,
+    public-v4: string,
+    public-v6: string,
+    // Internet blocked: values that need an internet connection show that in red instead of an address.
+    // Celata does not bypass the block for this.
+    public-blocked: bool,
+}
+
+// A figure: small label, the value below it
+component Figure inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 2px;
+
+    Text {
+        text: root.label;
+        font-size: 12px;
+        color: Theme.text-soft;
+    }
+
+    Text {
+        text: root.value;
+        font-size: 15px;
+        font-weight: 600;
+        color: Theme.text;
+    }
+}
+
+// Cell of the address table
+component Cell inherits Text {
+    font-size: 13px;
+    color: Theme.text;
+    wrap: word-wrap;
+    horizontal-stretch: 1;
+}
+
+// Header or row label of the address table
+component Label inherits Text {
+    font-size: 12px;
+    color: Theme.text-soft;
+}
+
+export component OverviewView inherits VerticalLayout {
+    in property <string> status-title;
+    in property <string> status-text;
+    in property <string> server;
+    in property <string> detail;
+    in property <string> notice;
+    in property <string> version-warning;
+    in property <string> command;
+    in property <bool> warning;
+    in property <string> tone;
+    in property <bool> switching;
+    in property <bool> can-disconnect;
+    in property <string> selected-host;
+    in property <string> main-label;
+    in property <string> main-action;
+    in property <string> location-label;
+    in property <image> location-flag;
+    in property <[HintRow]> hints;
+    in property <DetailsRow> details;
+    // Right area of the main button from `src/look.rs`: "route", "unblock" or "none"
+    in property <string> main-side;
+    in property <string> main-side-label;
+    // False only for "route" with the kill switch switched off; `route-hint` then explains why.
+    in property <bool> side-available;
+    in property <string> route-hint;
+
+    callback unblock-request();
+    callback connect(string);
+    callback disconnect();
+    callback open-locations();
+    callback route-request();
+
+    spacing: 16px;
+    alignment: start;
+
+    Text {
+        text: @tr("Overview");
+        font-size: Theme.page-title;
+        font-weight: 600;
+        color: Theme.text;
+    }
+
+    // --- State; with a red background and border when blocked ---
+    Card {
+        background: root.warning ? Theme.card-warning : Theme.card;
+        border-width: root.warning ? 2px : 1px;
+        border-color: root.warning ? Theme.tone-alert : Theme.card-border;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 8px;
+
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+
+                VerticalLayout {
+                    alignment: center;
+                    StatusDot {
+                        tone: root.tone;
+                    }
+                }
+
+                Text {
+                    text: root.status-title;
+                    font-size: Theme.status-title;
+                    font-weight: 600;
+                    color: root.warning ? Theme.tone-alert : Theme.text;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                }
+            }
+
+            if root.server != "": Text {
+                text: @tr("Server: {}", root.server);
+                font-size: 15px;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+
+            Text {
+                text: root.status-text;
+                wrap: word-wrap;
+                font-size: 14px;
+                color: Theme.text;
+            }
+
+            if root.notice != "": Text {
+                text: root.notice;
+                wrap: word-wrap;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+            }
+
+            if root.command != "": CommandBox {
+                command: root.command;
+            }
+
+            if root.detail != "": Text {
+                text: root.detail;
+                wrap: word-wrap;
+                font-size: 12px;
+                color: Theme.text-soft;
+            }
+        }
+    }
+
+    // --- Hints about settings ---
+    if root.hints.length > 0: Card {
+        VerticalLayout {
+            padding: 14px;
+            spacing: 6px;
+
+            for hint in root.hints: HorizontalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: hint.alert ? "!" : "•";
+                    width: 12px;
+                    font-size: 14px;
+                    font-weight: 700;
+                    color: hint.alert ? Theme.tone-alert : Theme.text-soft;
+                    accessible-role: none;
+                }
+
+                Text {
+                    text: hint.text;
+                    horizontal-stretch: 1;
+                    font-size: 13px;
+                    font-weight: hint.alert ? 600 : 400;
+                    color: hint.alert ? Theme.tone-alert : Theme.text-soft;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+
+    // --- Location: a click opens "Locations" ---
+    location := Card {
+        min-height: 64px;
+        background: location-touch.has-hover ? Theme.button-hover : Theme.card;
+        accessible-role: button;
+        accessible-label: root.location-label == "" ? @tr("Choose location") : @tr("Location: {}", root.location-label);
+        accessible-action-default => {
+            root.open-locations();
+        }
+
+        location-focus := FocusScope {
+            key-pressed(event) => {
+                if (event.text == " " || event.text == Key.Return) {
+                    root.open-locations();
+                    return accept;
+                }
+                return reject;
+            }
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 12px;
+
+                VerticalLayout {
+                    alignment: center;
+                    Flag {
+                        source: root.location-flag;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+
+                    Text {
+                        text: @tr("Location");
+                        font-size: Theme.place;
+                        color: Theme.text-soft;
+                    }
+
+                    Text {
+                        text: root.location-label == "" ? @tr("Choose location") : root.location-label;
+                        font-size: Theme.country;
+                        font-weight: 600;
+                        color: root.location-label != "" ? Theme.text
+                            : location-touch.has-hover ? Theme.button-hover-text : Theme.accent;
+                        // The full location is shown here, therefore wrap instead of cutting.
+                        wrap: word-wrap;
+                    }
+                }
+
+                Text {
+                    text: "›";
+                    font-size: 22px;
+                    color: Theme.text-soft;
+                    vertical-alignment: center;
+                    horizontal-stretch: 0;
+                }
+            }
+
+            location-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.open-locations();
+                }
+            }
+        }
+
+        if location-focus.has-focus: Rectangle {
+            border-radius: 8px;
+            border-width: 2px;
+            border-color: Theme.focus;
+        }
+    }
+
+    // --- Main button ---
+    MainButton {
+        text: root.main-label;
+        enabled: root.main-action != "none";
+        outline: root.main-action == "disconnect";
+        side: root.main-side;
+        side-text: root.main-side-label;
+        side-available: root.side-available;
+        clicked => {
+            if (root.main-action == "disconnect") {
+                root.disconnect();
+            } else if (root.main-action == "connect") {
+                if (root.selected-host == "") {
+                    root.open-locations();
+                } else {
+                    root.connect(root.selected-host);
+                }
+            }
+        }
+        side-clicked => {
+            if (root.main-side == "route") {
+                root.route-request();
+            } else if (root.main-side == "unblock") {
+                root.unblock-request();
+            }
+        }
+    }
+
+    // "Block internet" is greyed out: explain why
+    if root.main-side == "route" && !root.side-available: Text {
+        text: root.route-hint;
+        font-size: 12px;
+        color: Theme.text-soft;
+        wrap: word-wrap;
+    }
+
+    // Disconnect during a switch
+    if root.switching && root.can-disconnect: HorizontalLayout {
+        alignment: start;
+        SecondaryButton {
+            text: @tr("Disconnect");
+            clicked => {
+                root.disconnect();
+            }
+        }
+    }
+
+    // --- Connection: figures and addresses arranged by IPv4 and IPv6 ---
+    if root.details.public-v4 != "" || root.details.duration != "" || root.details.public-blocked: Card {
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+
+            Text {
+                text: @tr("Connection");
+                font-size: 15px;
+                font-weight: 600;
+                color: Theme.text;
+            }
+
+            GridLayout {
+                spacing-horizontal: 16px;
+                spacing-vertical: 6px;
+
+                // Figures in the same columns as the addresses
+                if root.details.duration != "": Row {
+                    Figure {
+                        label: @tr("Duration");
+                        value: root.details.duration;
+                    }
+
+                    Figure {
+                        label: @tr("Received");
+                        value: root.details.received;
+                    }
+
+                    Figure {
+                        label: @tr("Sent");
+                        value: root.details.sent;
+                    }
+                }
+
+                if root.details.duration != "": Row {
+                    Rectangle {
+                        height: 6px;
+                    }
+                }
+
+                Row {
+                    Label {
+                        text: "";
+                        width: 110px;
+                    }
+
+                    Label {
+                        text: "IPv4";
+                    }
+
+                    Label {
+                        text: "IPv6";
+                    }
+                }
+
+                if root.details.duration != "": Row {
+                    Label {
+                        text: @tr("VPN address");
+                    }
+
+                    Cell {
+                        text: root.details.address-v4 == "" ? "–" : root.details.address-v4;
+                    }
+
+                    Cell {
+                        text: root.details.address-v6 == "" ? "–" : root.details.address-v6;
+                    }
+                }
+
+                if root.details.duration != "": Row {
+                    Label {
+                        text: @tr("DNS servers");
+                    }
+
+                    Cell {
+                        text: root.details.dns-v4 == "" ? "–" : root.details.dns-v4;
+                    }
+
+                    Cell {
+                        text: root.details.dns-v6 == "" ? "–" : root.details.dns-v6;
+                    }
+                }
+
+                Row {
+                    Label {
+                        text: @tr("Public");
+                    }
+
+                    Cell {
+                        text: root.details.public-blocked ? @tr("Internet blocked") : root.details.public-v4;
+                        font-weight: 600;
+                        color: root.details.public-blocked ? Theme.tone-alert : Theme.text;
+                    }
+
+                    Cell {
+                        text: root.details.public-blocked ? @tr("Internet blocked") : root.details.public-v6;
+                        font-weight: 600;
+                        color: root.details.public-blocked ? Theme.tone-alert : Theme.text;
+                    }
+                }
+            }
+        }
+    }
+
+    if root.version-warning != "": Text {
+        text: root.version-warning;
+        wrap: word-wrap;
+        font-size: 12px;
+        color: Theme.version-text;
+    }
+}

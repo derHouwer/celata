@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 derHouwer
+#
+# Maintainer: derHouwer <355941224+derHouwer at users dot noreply dot github dot com>
+
+pkgname=celata
+pkgver=0.8.1
+pkgrel=1
+pkgdesc="Unofficial graphical interface for the hide.me VPN command-line client"
+arch=('x86_64')
+url="https://github.com/derHouwer/celata"
+license=('GPL-3.0-only')
+depends=(fontconfig ttf-font wayland libxkbcommon libglvnd iproute2 systemd hicolor-icon-theme libgcc glibc)
+makedepends=(cargo)
+optdepends=(
+  'hide-client: the hide.me command-line client (AUR), required to connect'
+  'xdg-utils: open the donation page in the browser'
+  'libx11: X11 session (enabled but untested)'
+  'libxcursor: X11 session (enabled but untested)'
+  'libxi: X11 session (enabled but untested)'
+  'libxkbcommon-x11: X11 session (enabled but untested)'
+)
+install=celata.install
+# The `ring` crate does not build with link-time optimization of its C and assembly parts. No separate
+# package with debug symbols.
+options=('!lto' '!debug')
+# Both archives are published with the release. If files with these names lie next to the PKGBUILD,
+# makepkg uses them instead of downloading (see docs/packaging.md).
+source=(
+  "$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz"
+  "$url/releases/download/v$pkgver/$pkgname-$pkgver-vendor.tar.zst"
+)
+# Placeholders in the source tree. packaging/build-packages.sh writes the real checksums of the two archives
+# into the PKGBUILD it puts into dist/, and that one is published with the release.
+sha256sums=('SKIP'
+            'SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  # Build without network access against the vendored crates.
+  export CARGO_HOME="$srcdir/cargo-home"
+  mkdir -p "$CARGO_HOME"
+  printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "%s/vendor"\n' \
+    "$srcdir" > "$CARGO_HOME/config.toml"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export CARGO_HOME="$srcdir/cargo-home"
+  export CARGO_TARGET_DIR=target
+  cargo build --release --locked --offline
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export CARGO_HOME="$srcdir/cargo-home"
+  export CARGO_TARGET_DIR=target
+  cargo test --release --locked --offline
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm0755 target/release/celata "$pkgdir/usr/bin/celata"
+  # The unit for the file locations of the AUR package `hide-client` (/usr/bin/hide.me, /etc/hide.me).
+  install -Dm0644 packaging/arch/celata-hide.me.service "$pkgdir/usr/lib/systemd/system/celata-hide.me.service"
+  install -Dm0644 packaging/sysusers/celata.conf "$pkgdir/usr/lib/sysusers.d/celata.conf"
+  install -Dm0644 packaging/desktop/celata.desktop "$pkgdir/usr/share/applications/celata.desktop"
+  install -Dm0644 ui/icons/celata.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/celata.svg"
+  install -Dm0644 packaging/desktop/io.github.derhouwer.celata.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/io.github.derhouwer.celata.metainfo.xml"
+  install -Dm0644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE THIRD-PARTY-LICENSES.md
+  install -Dm0644 -t "$pkgdir/usr/share/doc/$pkgname" README.md CHANGELOG.md docs/*.md
+}

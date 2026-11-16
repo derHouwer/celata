@@ -1,0 +1,70 @@
+[workspace]
+members = ["crates/celata-ui"]
+
+# The one place that defines the version of Celata. Both packages inherit it.
+[workspace.package]
+version = "0.8.1"
+edition = "2024"
+rust-version = "1.92"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace.lints.rust]
+# A forgotten `Result` is an error, not a warning.
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Exceptions from the pedantic group, each with its reason:
+# `#[must_use]` on every query function adds noise; a forgotten `Result` is already an error (above).
+must_use_candidate = "allow"
+# Celata is a program, not a library for others; where the error case is not obvious, the comment says so.
+missing_errors_doc = "allow"
+# Affects the two text tables (one `match` with 180 texts each), `main` and `apply_edit`.
+too_many_lines = "allow"
+# `StatusView` and `Filter` mirror switches of the interface and of the service one to one.
+struct_excessive_bools = "allow"
+# A `match` with two arms, one of them a longer block, reads better than `if let … else`.
+single_match_else = "allow"
+# Only in tests: the suggested `assert_eq!(list, [] as [T; 0])` is harder to read than `assert!(list.is_empty())`.
+assert_is_empty = "allow"
+
+[workspace.dependencies]
+# Only what Celata needs: no system tray. Accessibility stays on. Wayland is the supported session; X11 is
+# enabled so that Celata starts there at all, but it is untested. `compat-1-2` is mandatory for Slint as
+# soon as the default features are off.
+slint = { version = "1.18.1", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit-wayland",
+    "backend-winit-x11",
+    "renderer-femtovg",
+    "accessibility",
+] }
+
+[package]
+name = "celata"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Unofficial graphical interface for the hide.me VPN command-line client"
+
+[lints]
+workspace = true
+
+[lib]
+name = "celata"
+path = "src/lib.rs"
+
+[[bin]]
+name = "celata"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+slint.workspace = true
+celata-ui = { path = "crates/celata-ui" }
+ureq = "3.5.2"

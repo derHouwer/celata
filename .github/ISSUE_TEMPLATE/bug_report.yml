@@ -1,0 +1,86 @@
+name: Bug report
+description: Something in Celata does not work as it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a problem.
+
+        **Do not paste your Access-Token, passwords, or logs that show your addresses.** Issues are public.
+        Security problems do not belong here: please use "Report a vulnerability" in the "Security" tab.
+
+        If your internet is blocked right now: `sudo systemctl stop celata-hide.me.service` frees it.
+  - type: input
+    id: version
+    attributes:
+      label: Version of Celata
+      description: Output of `celata --version`
+      placeholder: celata 0.8.1
+    validations:
+      required: true
+  - type: input
+    id: distribution
+    attributes:
+      label: Distribution and release
+      placeholder: Fedora 44, Ubuntu 26.04, Debian 13, Arch Linux …
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install Celata?
+      options:
+        - .deb package
+        - .rpm package
+        - Arch package (PKGBUILD)
+        - Built from source
+    validations:
+      required: true
+  - type: dropdown
+    id: session
+    attributes:
+      label: Session
+      description: Output of `echo $XDG_SESSION_TYPE`
+      options:
+        - Wayland
+        - X11 (enabled but untested)
+        - I do not know
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop
+      placeholder: KDE Plasma, GNOME, Sway …
+  - type: input
+    id: client
+    attributes:
+      label: Version of the hide.me client
+      description: Celata 0.8.1 is tested with version 0.9.14
+      placeholder: 0.9.14
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start Celata
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Messages
+      description: >
+        Text shown in Celata or printed in the terminal when you start `celata` there. Remove addresses and
+        anything else you do not want to be public.
+      render: text

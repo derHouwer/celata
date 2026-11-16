@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 derHouwer
+Source: celata
+Section: net
+Priority: optional
+Maintainer: derHouwer <355941224+derHouwer@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13), pkgconf, libfontconfig-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/derHouwer/celata
+Rules-Requires-Root: no
+
+Package: celata
+Architecture: amd64
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         libwayland-client0,
+         libwayland-cursor0,
+         libwayland-egl1,
+         libxkbcommon0,
+         libegl1,
+         iproute2,
+         systemd
+Recommends: xdg-utils,
+            libx11-6,
+            libx11-xcb1,
+            libxcursor1,
+            libxi6,
+            libxkbcommon-x11-0,
+            libgl1
+Description: unofficial graphical interface for the hide.me VPN client
+ Celata shows the state of the VPN connection, lets you choose a location,
+ connect, switch and disconnect, and block the internet with the kill switch
+ of the hide.me client. It runs without administrator rights and talks to the
+ hide.me client through a local control socket.
+ .
+ Requires the hide.me command-line client (not included) and a hide.me
+ account. Wayland sessions are supported; X11 is enabled but untested.
+ .
+ Celata is an independent project. It is not affiliated with or endorsed by
+ hide.me.

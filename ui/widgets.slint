@@ -1,0 +1,1339 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 derHouwer
+
+// Own components in the style of the hide.me client.
+// Colours only from `Theme`. All buttons can be reached with the Tab key and are triggered with
+// Enter or Space.
+
+import { LineEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+// White card with a fine border. Background and border can be overridden (status card when blocked).
+export component Card inherits Rectangle {
+    background: Theme.card;
+    border-width: 1px;
+    border-color: Theme.card-border;
+    border-radius: 8px;
+    drop-shadow-blur: 6px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: Theme.shadow;
+}
+
+// Large blue button, on the left a separate field with a power symbol.
+// `outline`: white with blue border and blue text (while connected). `icon-field: false` for dialogs.
+export component PrimaryButton {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> outline;
+    in property <bool> icon-field: true;
+    callback clicked;
+
+    min-height: root.icon-field ? 52px : 36px;
+    min-width: content.min-width;
+    preferred-width: content.preferred-width;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if (root.enabled) {
+            root.clicked();
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+
+        body := Rectangle {
+            clip: true;
+            border-radius: 6px;
+            border-width: root.outline && root.enabled ? 2px : 0px;
+            border-color: Theme.accent;
+            background: !root.enabled
+                ? Theme.disabled-bg
+                : root.outline ? Theme.card : touch.pressed ? Theme.power-field : Theme.accent;
+
+            content := HorizontalLayout {
+                padding-left: root.icon-field ? 0px : 24px;
+                padding-right: root.icon-field ? 16px : 24px;
+                spacing: root.icon-field ? 16px : 0px;
+
+                if root.icon-field: Rectangle {
+                    width: 52px;
+                    background: !root.enabled ? Theme.disabled-bg : root.outline ? Theme.accent : Theme.power-field;
+
+                    Image {
+                        source: @image-url("icons/power.svg");
+                        width: 24px;
+                        height: 24px;
+                        colorize: root.enabled ? Theme.on-dark : Theme.disabled-text;
+                        accessible-role: none;
+                    }
+                }
+
+                Text {
+                    text: root.text;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    // Wrap instead of cutting.
+                    wrap: word-wrap;
+                    font-size: root.icon-field ? 16px : 14px;
+                    font-weight: 600;
+                    color: !root.enabled ? Theme.disabled-text : root.outline ? Theme.accent : Theme.on-dark;
+                    accessible-role: none;
+                }
+            }
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: pointer;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    if focus.has-focus: Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: Theme.focus;
+    }
+}
+
+// Main button of the overview: like `PrimaryButton` with the left field, plus a red area of the same
+// size on the right with an action of its own.
+// `side`: "route" (block internet), "unblock" (unblock internet) or "none" (no right area).
+//
+// "Red state": when the mouse enters the right area, the whole button turns red and shows `side-text`.
+// It stays red as long as the mouse is anywhere in the button and only turns blue again when the mouse
+// leaves the button. In the red state a click anywhere in the button triggers the action of the right
+// area. The same applies as long as the keyboard focus is on the right area.
+// The size of the button does not depend on the red state: the left field is merely drawn empty.
+// For keyboard and screen readers, main part and right area are two buttons next to each other.
+export component MainButton {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> outline;
+    in property <string> side: "none";
+    in property <string> side-text;
+    // False: right area greyed out (kill switch off in the settings)
+    in property <bool> side-available: true;
+    callback clicked;
+    callback side-clicked;
+
+    property <length> field: 52px;
+    // The right area currently offers an action and can be used.
+    property <bool> side-usable: root.side != "none" && root.side-available;
+    // Remembered: the mouse is currently over the right area. Only set in the mouse events, not as a
+    // binding: otherwise the width of the button would depend on itself through the text.
+    property <bool> over-side;
+    // Remembered: the mouse was on the usable right area and has not left the button since. It also
+    // persists when the state changes under the resting mouse (after "Block internet" the button then
+    // reads "Unblock internet").
+    property <bool> armed;
+    // A mouse click at the current position triggers the action of the right area.
+    property <bool> click-is-side: root.side-usable && (root.armed || root.over-side);
+    // A mouse click at the current position triggers the action of the main part. A greyed-out right
+    // area does not belong to the main part: a click there does nothing.
+    property <bool> click-is-main: root.enabled && !root.click-is-side && !(root.side != "none" && root.over-side);
+    // Red state. With the mouse it applies exactly when a click triggers the action of the right area:
+    // the button always shows what a click does.
+    property <bool> hot: root.click-is-side || (root.side-usable && side-focus.has-focus);
+
+    min-height: 52px;
+    min-width: content.min-width;
+    preferred-width: content.preferred-width;
+
+    body := Rectangle {
+        clip: true;
+        border-radius: 6px;
+        border-width: root.outline && root.enabled && !root.hot ? 2px : 0px;
+        border-color: Theme.accent;
+        background: root.hot
+            ? (touch.pressed ? Theme.alert-pressed : Theme.tone-alert)
+            : !root.enabled
+                ? Theme.disabled-bg
+                : root.outline
+                    ? Theme.card
+                    : touch.pressed && root.click-is-main ? Theme.power-field : Theme.accent;
+
+        content := HorizontalLayout {
+            spacing: 16px;
+            padding-right: root.side == "none" ? 16px : 0px;
+
+            // Left field. In the red state only its space remains, so that the text does not jump.
+            Rectangle {
+                width: root.field;
+                background: root.hot
+                    ? transparent
+                    : !root.enabled ? Theme.disabled-bg : root.outline ? Theme.accent : Theme.power-field;
+
+                if !root.hot: Image {
+                    source: @image-url("icons/power.svg");
+                    width: 24px;
+                    height: 24px;
+                    colorize: root.enabled ? Theme.on-dark : Theme.disabled-text;
+                    accessible-role: none;
+                }
+            }
+
+            Text {
+                text: root.hot ? root.side-text : root.text;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                // Wrap instead of cutting, also for longer texts of other languages.
+                wrap: word-wrap;
+                font-size: 16px;
+                font-weight: 600;
+                color: root.hot
+                    ? Theme.on-dark
+                    : !root.enabled ? Theme.disabled-text : root.outline ? Theme.accent : Theme.on-dark;
+                accessible-role: none;
+            }
+
+            // Right area
+            if root.side != "none": Rectangle {
+                width: root.field;
+                background: !root.side-available
+                    ? Theme.disabled-bg
+                    : touch.pressed && root.click-is-side ? Theme.alert-pressed : Theme.tone-alert;
+
+                Image {
+                    source: root.side == "unblock"
+                        ? @image-url("icons/lock-open.svg")
+                        : @image-url("icons/globe-lock.svg");
+                    width: 24px;
+                    height: 24px;
+                    colorize: root.side-available ? Theme.on-dark : Theme.disabled-text;
+                    accessible-role: none;
+                }
+            }
+        }
+    }
+
+    // --- Main part: keyboard and screen reader ---
+    Rectangle {
+        x: 0px;
+        width: main-focus.width;
+        accessible-role: button;
+        accessible-label: root.text;
+        accessible-enabled: root.enabled;
+        accessible-action-default => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
+    }
+
+    main-focus := FocusScope {
+        x: 0px;
+        width: root.width - root.field;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    // --- Right area: keyboard and screen reader ---
+    if root.side != "none": Rectangle {
+        x: root.width - root.field;
+        width: root.field;
+        accessible-role: button;
+        accessible-label: root.side-text;
+        accessible-enabled: root.side-available;
+        accessible-action-default => {
+            if (root.side-usable) {
+                root.side-clicked();
+            }
+        }
+    }
+
+    side-focus := FocusScope {
+        x: root.width - root.field;
+        width: root.field;
+        enabled: root.side-usable;
+        // The focus only gets here through the Tab key, never through a mouse click.
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (root.side-usable && (event.text == " " || event.text == Key.Return)) {
+                root.side-clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    // --- Mouse: one area over the whole button ---
+    // Always enabled, so that "mouse over it" is kept when the state changes under the resting mouse.
+    // What a click triggers is decided at the moment of the click.
+    touch := TouchArea {
+        mouse-cursor: root.click-is-side || root.click-is-main ? pointer : default;
+
+        // When the mouse leaves the button, the red state ends. When it enters on the right area, the
+        // red state begins.
+        changed has-hover => {
+            root.over-side = self.has-hover && self.mouse-x >= root.width - root.field;
+            if (!self.has-hover) {
+                root.armed = false;
+            } else if (root.side-usable && root.over-side) {
+                root.armed = true;
+            }
+        }
+        // When the mouse moves onto the right area inside the button, the red state begins. Moving back
+        // to the left changes nothing: it only ends on leaving the button.
+        changed mouse-x => {
+            root.over-side = self.has-hover && self.mouse-x >= root.width - root.field;
+            if (root.side-usable && root.over-side) {
+                root.armed = true;
+            }
+        }
+        clicked => {
+            // The position of the click counts, even if the mouse did not move before it.
+            root.over-side = self.mouse-x >= root.width - root.field;
+            if (root.click-is-side) {
+                root.side-clicked();
+            } else if (root.click-is-main) {
+                root.clicked();
+            }
+        }
+    }
+
+    if main-focus.has-focus || side-focus.has-focus: Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: Theme.focus;
+    }
+}
+
+// White button with a border. `danger`: border and text red (unblock internet).
+export component SecondaryButton {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> danger;
+    // Icon to the left of the text (empty = no icon) and a separate name for screen readers.
+    // Without these the button looks the same as without them.
+    in property <image> icon;
+    in property <color> icon-color: Theme.tone-alert;
+    in property <string> label: root.text;
+    callback clicked;
+
+    // Space for the icon (16px) and the gap (8px)
+    property <length> icon-space: root.icon.width > 0 ? 24px : 0px;
+
+    min-height: 36px;
+    min-width: caption.min-width + 32px + root.icon-space;
+    preferred-width: caption.preferred-width + 32px + root.icon-space;
+    horizontal-stretch: 0;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if (root.enabled) {
+            root.clicked();
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+
+        Rectangle {
+            border-radius: 6px;
+            border-width: root.enabled ? 1px : 0px;
+            border-color: root.danger ? Theme.tone-alert : touch.has-hover ? Theme.button-hover-text : Theme.accent;
+            background: !root.enabled ? Theme.disabled-bg : touch.has-hover ? Theme.button-hover : Theme.card;
+
+            if root.icon-space > 0: Image {
+                x: (parent.width - root.icon-space - caption.preferred-width) / 2;
+                y: (parent.height - 16px) / 2;
+                width: 16px;
+                height: 16px;
+                source: root.icon;
+                colorize: root.enabled ? root.icon-color : Theme.disabled-text;
+                accessible-role: none;
+            }
+
+            caption := Text {
+                x: root.icon-space > 0 ? (parent.width - root.icon-space - self.preferred-width) / 2 + root.icon-space : 0px;
+                width: root.icon-space > 0 ? self.preferred-width : parent.width;
+                text: root.text;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: 14px;
+                font-weight: 600;
+                color: !root.enabled ? Theme.disabled-text
+                    : root.danger ? Theme.tone-alert
+                    : touch.has-hover ? Theme.button-hover-text : Theme.accent;
+                accessible-role: none;
+            }
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: pointer;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    if focus.has-focus: Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: Theme.focus;
+    }
+}
+
+// Status dot with a white ring, so that it also stands out on the blue sidebar.
+// `tone` comes from `src/look.rs`: "ok", "busy", "alert" or "idle".
+export component StatusDot inherits Rectangle {
+    in property <string> tone: "idle";
+    width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    background: Theme.on-dark;
+
+    Rectangle {
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: root.tone == "ok"
+            ? Theme.tone-ok
+            : root.tone == "busy" ? Theme.tone-busy : root.tone == "alert" ? Theme.tone-alert : Theme.tone-idle;
+    }
+}
+
+// Rectangular country flag. Without an image a grey placeholder.
+export component Flag inherits Rectangle {
+    in property <image> source;
+    width: 24px;
+    height: 18px;
+    background: root.source.width == 0 ? Theme.disabled-bg : transparent;
+    border-width: root.source.width == 0 ? 1px : 0px;
+    border-color: Theme.card-border;
+
+    if root.source.width > 0: Image {
+        source: root.source;
+        width: 24px;
+        height: 18px;
+        image-fit: fill;
+        accessible-role: none;
+    }
+}
+
+// Tabs with a blue line below the selected one.
+export component Tabs {
+    in property <[string]> labels;
+    in-out property <int> current: 0;
+
+    min-height: 40px;
+    accessible-role: tab-list;
+
+    HorizontalLayout {
+        alignment: start;
+        spacing: 4px;
+
+        for label[index] in root.labels: Rectangle {
+            min-width: tab-text.preferred-width + 24px;
+            accessible-role: tab;
+            accessible-label: label;
+            accessible-item-selectable: true;
+            accessible-item-selected: index == root.current;
+            accessible-item-index: index;
+            accessible-item-count: root.labels.length;
+            accessible-action-default => {
+                root.current = index;
+            }
+
+            tab-focus := FocusScope {
+                key-pressed(event) => {
+                    if (event.text == " " || event.text == Key.Return) {
+                        root.current = index;
+                        return accept;
+                    }
+                    return reject;
+                }
+
+                tab-text := Text {
+                    text: label;
+                    font-size: 14px;
+                    font-weight: index == root.current ? 600 : 400;
+                    color: index == root.current ? Theme.accent : Theme.tab-idle;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.current = index;
+                    }
+                }
+            }
+
+            if index == root.current: Rectangle {
+                y: parent.height - 3px;
+                height: 3px;
+                background: Theme.accent;
+            }
+
+            if tab-focus.has-focus: Rectangle {
+                border-width: 2px;
+                border-color: Theme.focus;
+                border-radius: 4px;
+            }
+        }
+    }
+}
+
+// Entry of the sidebar: selected in dark blue with a white bar on the left.
+export component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> selected;
+    callback clicked;
+
+    height: 44px;
+    background: root.selected ? Theme.sidebar-selected : touch.has-hover ? Theme.sidebar-hover : transparent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-item-selected: root.selected;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 12px;
+            spacing: 12px;
+
+            Image {
+                source: root.icon;
+                width: 20px;
+                height: 20px;
+                y: (parent.height - self.height) / 2;
+                colorize: Theme.on-dark;
+                accessible-role: none;
+            }
+
+            Text {
+                text: root.text;
+                font-size: 14px;
+                font-weight: root.selected ? 600 : 400;
+                color: Theme.on-dark;
+                vertical-alignment: center;
+                // Wrap instead of cutting.
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+        }
+
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    if root.selected: Rectangle {
+        x: 0px;
+        width: 4px;
+        background: Theme.on-dark;
+    }
+
+    if focus.has-focus: Rectangle {
+        x: 2px;
+        y: 2px;
+        width: root.width - 4px;
+        height: root.height - 4px;
+        border-width: 2px;
+        border-color: Theme.on-dark;
+    }
+}
+
+// --- Donation hint ---
+// The texts come from `src/donation.rs`. Defined here so that the sidebar (`main.slint`) and the
+// settings (`settings.slint`) use the same type.
+export struct DonationTexts {
+    card-title: string,
+    card-text: string,
+    button: string,
+    button-label: string,
+    section-title: string,
+    section-text: string,
+    toggle: string,
+    toggle-description: string,
+}
+
+// Card in the sidebar above the state.
+// The button only reports `donate()`; the user interface does not know the link.
+export component DonationCard inherits Rectangle {
+    in property <string> title;
+    in property <string> text;
+    in property <string> button;
+    in property <string> button-label;
+    callback donate();
+
+    background: Theme.sidebar-selected;
+    border-radius: 8px;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        Text {
+            text: root.title;
+            font-size: 13px;
+            font-weight: 600;
+            color: Theme.on-dark;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: root.text;
+            font-size: 12px;
+            color: Theme.on-dark;
+            wrap: word-wrap;
+        }
+
+        Rectangle {
+            height: 32px;
+            // Written out in full, because the shorthand `button` would otherwise hide the name
+            accessible-role: AccessibleRole.button;
+            accessible-label: root.button-label;
+            accessible-action-default => {
+                root.donate();
+            }
+
+            focus := FocusScope {
+                // A mouse click does not set the keyboard focus (as with the main button)
+                focus-on-click: false;
+                key-pressed(event) => {
+                    if (event.text == " " || event.text == Key.Return) {
+                        root.donate();
+                        return accept;
+                    }
+                    return reject;
+                }
+
+                Rectangle {
+                    border-radius: 6px;
+                    background: touch.has-hover ? Theme.row-hover : Theme.card;
+
+                    // 12px instead of 13px: at a width of 152px, 13px would leave a margin of only
+                    // 3px.
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        padding-left: 6px;
+                        padding-right: 6px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                source: @image-url("icons/heart.svg");
+                                width: 16px;
+                                height: 16px;
+                                colorize: Theme.tone-alert;
+                                accessible-role: none;
+                            }
+                        }
+
+                        Text {
+                            text: root.button;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: Theme.topbar;
+                            vertical-alignment: center;
+                            // Wrap instead of cutting.
+                            wrap: word-wrap;
+                            accessible-role: none;
+                        }
+                    }
+                }
+
+                touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.donate();
+                    }
+                }
+            }
+
+            // Focus frame outside the button, white on the blue of the card
+            if focus.has-focus: Rectangle {
+                x: -4px;
+                y: -4px;
+                width: parent.width + 8px;
+                height: parent.height + 8px;
+                border-radius: 8px;
+                border-width: 2px;
+                border-color: Theme.on-dark;
+            }
+        }
+    }
+}
+
+// A command for the terminal: easy to read, selectable and with a button for copying. Also used for
+// the link in the message that the browser could not be opened (`copy-label`, `label`).
+export component CommandBox inherits VerticalLayout {
+    in property <string> command;
+    in property <string> copy-label: @tr("Copy command");
+    in property <string> label: @tr("Command for the terminal");
+    spacing: 6px;
+
+    Rectangle {
+        background: Theme.command-bg;
+        border-radius: 4px;
+        min-height: 40px;
+
+        HorizontalLayout {
+            padding: 10px;
+            command-input := TextInput {
+                text: root.command;
+                read-only: true;
+                single-line: false;
+                wrap: word-wrap;
+                font-family: "monospace";
+                font-size: 14px;
+                color: Theme.command-fg;
+                selection-background-color: Theme.accent;
+                accessible-role: text;
+                accessible-label: root.label;
+            }
+        }
+    }
+
+    HorizontalLayout {
+        alignment: start;
+        SecondaryButton {
+            text: root.copy-label;
+            clicked => {
+                command-input.select-all();
+                command-input.copy();
+                command-input.clear-selection();
+            }
+        }
+    }
+}
+
+// --- Components for the page "Settings" ---
+// All values come from Rust (`in` properties). The components only report what the user wants; Rust
+// checks, saves and sets the display anew. This keeps the stored value the single source of truth.
+
+// Switch with a label: on = `accent`, off = `disabled-bg`, knob `card`.
+// The layout is a direct child, so that the height follows the (wrapping) description. A `FocusScope`
+// around the whole layout would set the height to one line; the following elements would overlap then.
+export component Toggle {
+    in property <string> text;
+    in property <string> description;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    accessible-role: checkbox;
+    accessible-label: root.text;
+    accessible-description: root.description;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if (root.enabled) {
+            root.toggled(!root.checked);
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+
+        VerticalLayout {
+            alignment: start;
+
+            focus := FocusScope {
+                width: 40px;
+                height: 22px;
+                enabled: root.enabled;
+                key-pressed(event) => {
+                    if (event.text == " " || event.text == Key.Return) {
+                        root.toggled(!root.checked);
+                        return accept;
+                    }
+                    return reject;
+                }
+
+                Rectangle {
+                    border-radius: 11px;
+                    background: root.checked && root.enabled ? Theme.accent : Theme.disabled-bg;
+                    border-width: root.checked ? 0px : 1px;
+                    border-color: Theme.disabled-text;
+
+                    Rectangle {
+                        x: root.checked ? parent.width - self.width - 3px : 3px;
+                        width: 16px;
+                        height: 16px;
+                        border-radius: 8px;
+                        background: Theme.card;
+                        border-width: root.checked ? 0px : 1px;
+                        border-color: Theme.disabled-text;
+                        animate x { duration: 120ms; }
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+
+            Text {
+                text: root.text;
+                font-size: 14px;
+                color: root.enabled ? Theme.text : Theme.disabled-text;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+
+            if root.description != "": Text {
+                text: root.description;
+                font-size: 12px;
+                color: Theme.text-soft;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+        }
+    }
+
+    // Click on the whole row, above the layout
+    TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            root.toggled(!root.checked);
+        }
+    }
+
+    if focus.has-focus: Rectangle {
+        x: -3px;
+        y: -1px;
+        width: root.width + 6px;
+        height: root.height + 2px;
+        border-radius: 6px;
+        border-width: 2px;
+        border-color: Theme.focus;
+    }
+}
+
+// Subheading inside a card, with a fine line above it for structure.
+export component Subheading inherits VerticalLayout {
+    in property <string> text;
+    spacing: 8px;
+    padding-top: 6px;
+
+    Rectangle {
+        height: 1px;
+        background: Theme.card-border;
+    }
+
+    Text {
+        text: root.text;
+        font-size: 14px;
+        font-weight: 600;
+        color: Theme.text;
+        wrap: word-wrap;
+        accessible-role: AccessibleRole.text;
+    }
+}
+
+// Header row of an expandable section. The surrounding view shows the content depending on `open`.
+export component Expander {
+    in property <string> title;
+    in-out property <bool> open;
+    callback toggled(bool);
+
+    min-height: 40px;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-expandable: true;
+    accessible-expanded: root.open;
+    accessible-action-default => {
+        root.open = !root.open;
+        root.toggled(root.open);
+    }
+    accessible-action-expand => {
+        root.open = !root.open;
+        root.toggled(root.open);
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.open = !root.open;
+                root.toggled(root.open);
+                return accept;
+            }
+            return reject;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                text: root.open ? "⌄" : "›";
+                width: 16px;
+                font-size: 18px;
+                color: Theme.accent;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                accessible-role: none;
+            }
+
+            Text {
+                text: root.title;
+                font-size: 15px;
+                font-weight: 600;
+                color: Theme.accent;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                accessible-role: none;
+            }
+        }
+
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.open = !root.open;
+                root.toggled(root.open);
+            }
+        }
+    }
+
+    if focus.has-focus: Rectangle {
+        border-radius: 6px;
+        border-width: 2px;
+        border-color: Theme.focus;
+    }
+}
+
+// Heading of a section inside a card.
+export component SectionTitle inherits Text {
+    font-size: 16px;
+    font-weight: 600;
+    color: Theme.text;
+    wrap: word-wrap;
+}
+
+// Explanatory text in a muted colour.
+export component Explanation inherits Text {
+    font-size: 12px;
+    color: Theme.text-soft;
+    wrap: word-wrap;
+}
+
+// Error directly below a field.
+export component FieldError inherits Text {
+    font-size: 12px;
+    color: Theme.tone-alert;
+    wrap: word-wrap;
+}
+
+// Text field with label and error. `accepted` comes on Enter and on leaving the field, never per
+// keystroke. `value` is the stored value.
+export component Field inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <string> error;
+    in property <string> placeholder;
+    in property <string> hint;
+    // Rust counts this up so that the field shows the stored value again (reset, cancel)
+    in property <int> revision;
+    callback accepted(string);
+
+    spacing: 4px;
+    // Columns of equal width in the grid, input field never higher than needed
+    alignment: start;
+    horizontal-stretch: 1;
+    // Same base width, so that the columns in the grid are equally wide; the label wraps.
+    preferred-width: 120px;
+
+    // Show the stored value after saving or resetting.
+    changed value => {
+        edit.text = root.value;
+    }
+    changed revision => {
+        edit.text = root.value;
+    }
+
+    Text {
+        text: root.label;
+        font-size: 13px;
+        color: Theme.text;
+        wrap: word-wrap;
+    }
+
+    edit := LineEdit {
+        text: root.value;
+        placeholder-text: root.placeholder;
+        accessible-label: root.label;
+        accessible-description: root.error != "" ? root.error : root.hint;
+        accepted(text) => {
+            root.accepted(text);
+        }
+        changed has-focus => {
+            if (!self.has-focus && self.text != root.value) {
+                root.accepted(self.text);
+            }
+        }
+    }
+
+    if root.hint != "": Explanation {
+        text: root.hint;
+    }
+
+    if root.error != "": FieldError {
+        text: root.error;
+    }
+}
+
+// List with entries that can be removed and a field for adding.
+export component ListEditor inherits VerticalLayout {
+    in property <string> label;
+    in property <[string]> items;
+    in property <string> error;
+    in property <string> placeholder;
+    in property <string> hint;
+    // Rust counts this up so that rejected input disappears from the field (reset)
+    in property <int> revision;
+    callback add(string);
+    callback remove(int);
+
+    spacing: 6px;
+
+    changed revision => {
+        input.text = "";
+    }
+
+    Text {
+        text: root.label;
+        font-size: 13px;
+        font-weight: 600;
+        color: Theme.text;
+        wrap: word-wrap;
+    }
+
+    if root.hint != "": Explanation {
+        text: root.hint;
+    }
+
+    for item[index] in root.items: HorizontalLayout {
+        spacing: 8px;
+
+        Text {
+            text: item;
+            font-size: 13px;
+            color: Theme.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide; // may be cut: an entry of the user such as a DNS stamp, not a translated text
+        }
+
+        SecondaryButton {
+            text: @tr("Remove");
+            accessible-label: @tr("Remove: {}", item);
+            clicked => {
+                root.remove(index);
+            }
+        }
+    }
+
+    if root.items.length == 0: Explanation {
+        text: @tr("No entries.");
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        input := LineEdit {
+            horizontal-stretch: 1;
+            placeholder-text: root.placeholder;
+            accessible-label: @tr("{}: new entry", root.label);
+            accepted(text) => {
+                if (text != "") {
+                    root.add(text);
+                    self.text = "";
+                }
+            }
+        }
+
+        SecondaryButton {
+            text: @tr("Add");
+            enabled: input.text != "";
+            clicked => {
+                root.add(input.text);
+                input.text = "";
+            }
+        }
+    }
+
+    if root.error != "": FieldError {
+        text: root.error;
+    }
+}
+
+// Selection from a few fixed values as a row of buttons (parental control, IP version).
+export component ChoiceRow inherits VerticalLayout {
+    in property <string> label;
+    in property <[string]> labels;
+    in property <int> current;
+    callback chosen(int);
+
+    spacing: 6px;
+
+    Text {
+        text: root.label;
+        font-size: 13px;
+        color: Theme.text;
+        wrap: word-wrap;
+    }
+
+    HorizontalLayout {
+        alignment: start;
+        spacing: 6px;
+        accessible-role: list;
+        accessible-label: root.label;
+
+        for option[index] in root.labels: Rectangle {
+            min-width: option-text.preferred-width + 24px;
+            min-height: 32px;
+            border-radius: 6px;
+            // Hover only through the border: blue on `row-hover` does not reach 4.5 : 1 (tests/kontrast.rs).
+            border-width: option-touch.has-hover ? 2px : 1px;
+            border-color: Theme.accent;
+            background: index == root.current ? Theme.accent : Theme.card;
+            accessible-role: button;
+            accessible-label: option;
+            accessible-item-selectable: true;
+            accessible-item-selected: index == root.current;
+            accessible-action-default => {
+                root.chosen(index);
+            }
+
+            option-focus := FocusScope {
+                key-pressed(event) => {
+                    if (event.text == " " || event.text == Key.Return) {
+                        root.chosen(index);
+                        return accept;
+                    }
+                    return reject;
+                }
+
+                option-text := Text {
+                    text: option;
+                    font-size: 13px;
+                    font-weight: index == root.current ? 600 : 400;
+                    color: index == root.current ? Theme.on-dark : Theme.accent;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+
+                option-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.chosen(index);
+                    }
+                }
+            }
+
+            if option-focus.has-focus: Rectangle {
+                x: -3px;
+                y: -3px;
+                width: parent.width + 6px;
+                height: parent.height + 6px;
+                border-radius: 8px;
+                border-width: 2px;
+                border-color: Theme.focus;
+            }
+        }
+    }
+}
+
+// Question before a change that reduces the protection.
+export component ConfirmDialog inherits Rectangle {
+    in property <string> title;
+    in property <string> text;
+    in property <bool> danger;
+    in property <string> ok-label;
+    callback ok();
+    callback cancel();
+
+    width: 100%;
+    height: 100%;
+    background: Theme.scrim;
+
+    // Catch clicks on the window behind
+    TouchArea { }
+
+    Card {
+        width: min(parent.width - 32px, 460px);
+        height: confirm-layout.preferred-height;
+        border-width: root.danger ? 2px : 1px;
+        border-color: root.danger ? Theme.tone-alert : Theme.card-border;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: Theme.shadow-dialog;
+
+        confirm-layout := VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            Text {
+                text: root.title;
+                font-size: 18px;
+                font-weight: 600;
+                color: root.danger ? Theme.tone-alert : Theme.text;
+                wrap: word-wrap;
+            }
+
+            Text {
+                text: root.text;
+                wrap: word-wrap;
+                font-size: 14px;
+                color: Theme.text;
+            }
+
+            VerticalLayout {
+                spacing: 8px;
+
+                SecondaryButton {
+                    text: root.ok-label;
+                    danger: root.danger;
+                    clicked => {
+                        root.ok();
+                    }
+                }
+
+                PrimaryButton {
+                    text: @tr("Cancel");
+                    icon-field: false;
+                    clicked => {
+                        root.cancel();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Info message in the style of the cards: rounded, lightly tinted, coloured border and round symbol.
+// Blue with ✓ on success, red with ! if something was not applied. The stronger shadow lifts it subtly
+// from the content. Rust clears the text after 8 seconds. All colour pairs are in tests/kontrast.rs.
+// `link`: if it is set, the link is shown below the text for selecting and copying. Without a link
+// the measurements are: symbol at 16px, text at 52px, 14px above and below.
+export component Toast inherits Rectangle {
+    in property <string> text;
+    in property <bool> alert;
+    in property <string> link;
+    background: root.alert ? Theme.card-warning : Theme.row-hover;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.alert ? Theme.tone-alert : Theme.accent;
+    height: content.preferred-height;
+    drop-shadow-blur: 18px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.shadow-strong;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.text;
+
+    content := HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 14px;
+        padding-bottom: 14px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: root.link == "" ? LayoutAlignment.center : LayoutAlignment.start;
+
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 12px;
+                background: root.alert ? Theme.tone-alert : Theme.accent;
+
+                Text {
+                    text: root.alert ? "!" : "✓";
+                    font-size: 14px;
+                    font-weight: 700;
+                    color: Theme.on-dark;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 10px;
+
+            Text {
+                min-height: 24px;
+                text: root.text;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+                wrap: word-wrap;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+
+            if root.link != "": CommandBox {
+                command: root.link;
+                copy-label: @tr("Copy link");
+                label: @tr("Link to the Ko-fi page");
+            }
+        }
+    }
+}

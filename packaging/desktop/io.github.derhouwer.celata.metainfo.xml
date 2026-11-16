@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<component type="desktop-application">
+  <id>io.github.derhouwer.celata</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Celata</name>
+  <summary>Unofficial graphical interface for the hide.me VPN command-line client</summary>
+  <summary xml:lang="de">Inoffizielle grafische Oberfläche für den Kommandozeilen-Client des VPN-Dienstes hide.me</summary>
+  <developer id="io.github.derhouwer">
+    <name>derHouwer</name>
+  </developer>
+  <description>
+    <p>Celata shows the state of the VPN connection, lets you choose a location, connect, switch and disconnect, and block the internet with the kill switch of the hide.me client. It runs without administrator rights and talks to the hide.me client through a local control socket.</p>
+    <p xml:lang="de">Celata zeigt den Zustand der VPN-Verbindung, lässt dich einen Standort wählen, verbinden, wechseln und trennen und das Internet mit der Internet-Sperre des hide.me-Clients sperren. Es läuft ohne Administratorrechte und spricht mit dem hide.me-Client über einen lokalen Steuer-Socket.</p>
+    <p>Requires the hide.me command-line client (not included) and a hide.me account. Wayland sessions are supported; X11 is enabled but untested.</p>
+    <p xml:lang="de">Benötigt den hide.me-Kommandozeilen-Client (nicht enthalten) und ein hide.me-Konto. Wayland-Sitzungen werden unterstützt; X11 ist eingeschaltet, aber ungetestet.</p>
+    <p>Celata is an independent project. It is not affiliated with or endorsed by hide.me.</p>
+    <p xml:lang="de">Celata ist ein unabhängiges Projekt. Es steht in keiner Verbindung zu hide.me und wird von hide.me nicht unterstützt.</p>
+  </description>
+  <launchable type="desktop-id">celata.desktop</launchable>
+  <url type="homepage">https://github.com/derHouwer/celata</url>
+  <url type="bugtracker">https://github.com/derHouwer/celata/issues</url>
+  <categories>
+    <category>Network</category>
+  </categories>
+  <provides>
+    <binary>celata</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.8.1" date="2026-11-16"/>
+  </releases>
+</component>

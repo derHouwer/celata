@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 derHouwer
+
+// The only place for colours and font sizes of Celata.
+// Other Slint files take colours only from here. `tests/kontrast.rs` reads this file and checks the
+// contrasts; therefore keep the lines in the format `out property <color> name: #rrggbb;`.
+
+export global Theme {
+    // Frame
+    out property <color> topbar: #0b3754;
+    out property <color> sidebar: #127bb0;
+    out property <color> sidebar-selected: #0b5f87;
+    out property <color> sidebar-hover: #106f9f;
+    out property <color> on-dark: #ffffff;
+    out property <color> surface: #f1f6f9;
+    out property <color> card: #ffffff;
+    out property <color> card-border: #dde6ec;
+    // Light shadow of the cards (transparent black, no text)
+    out property <color> shadow: #0000001a;
+    // Stronger shadow for floating messages (no text)
+    out property <color> shadow-strong: #00000033;
+    // Dimming of the window behind a dialog and shadow of the dialog (no text)
+    out property <color> scrim: #00000080;
+    out property <color> shadow-dialog: #00000060;
+
+    // Buttons and tabs
+    out property <color> accent: #127bb0;
+    out property <color> power-field: #0f6a9a;
+    out property <color> tab-idle: #5f6b75;
+    out property <color> disabled-bg: #e3e8ec;
+    out property <color> disabled-text: #56616a;
+    out property <color> focus: #0b3754;
+    // White button or card while the mouse is over it: the tint of `row-hover` with a darker blue for text and
+    // border, because `accent` on this tint reaches only 4.18 : 1.
+    out property <color> button-hover: #e8f4fb;
+    out property <color> button-hover-text: #0f6a9a;
+
+    // Text
+    out property <color> text: #1a1a1a;
+    out property <color> text-soft: #555555;
+    out property <color> free-text: #1a6e35;
+    out property <color> version-text: #8a5a00;
+
+    // List
+    out property <color> row-hover: #e8f4fb;
+    out property <color> row-selected: #d3eaf7;
+
+    // State
+    out property <color> tone-ok: #2e9d4f;
+    out property <color> tone-busy: #e8a317;
+    out property <color> tone-alert: #c4302b;
+    // Red main button while the mouse button is pressed
+    out property <color> alert-pressed: #a32722;
+    out property <color> tone-idle: #7a7a7a;
+    out property <color> card-warning: #fde7e6;
+
+    // Command for the terminal
+    out property <color> command-bg: #1f1f1f;
+    out property <color> command-fg: #f0f0f0;
+
+    // Second accent colour, prepared but not in use: a violet for every blue tone above. To switch, exchange
+    // the values of each pair (`topbar` with `alt-topbar`, and so on); nothing else refers to these lines.
+    // `tests/kontrast.rs` checks the same colour pairs for this variant.
+    out property <color> alt-topbar: #2a1f5c;
+    out property <color> alt-sidebar: #5b4bb5;
+    out property <color> alt-sidebar-selected: #44378f;
+    out property <color> alt-sidebar-hover: #5142a6;
+    out property <color> alt-accent: #5b4bb5;
+    out property <color> alt-power-field: #4c3ea0;
+    out property <color> alt-focus: #2a1f5c;
+    out property <color> alt-button-hover: #efedfa;
+    out property <color> alt-button-hover-text: #4c3ea0;
+    out property <color> alt-row-hover: #efedfa;
+    out property <color> alt-row-selected: #dfdbf5;
+
+    // Font sizes
+    out property <length> page-title: 24px;
+    out property <length> status-title: 20px;
+    out property <length> country: 14px;
+    out property <length> place: 12px;
+}

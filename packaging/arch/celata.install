@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 derHouwer
+#
+# Installing never starts or enables the service and adds no user to the group.
+
+post_install() {
+  echo "Celata needs the hide.me command-line client (AUR: hide-client) and a hide.me account."
+  echo "To use it, add your user to the group and start the service:"
+  echo "  sudo usermod -aG celata \"\$USER\"    (then log out and back in once)"
+  echo "  sudo systemctl start celata-hide.me.service"
+  echo "See /usr/share/doc/celata/README.md."
+}
+
+# Removing stops the service (which lifts an internet block) and disables it. An update does not run this.
+pre_remove() {
+  systemctl disable --now celata-hide.me.service >/dev/null 2>&1 || true
+}

@@ -1,0 +1,26 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Celata
+Upstream-Contact: https://github.com/derHouwer/celata/issues
+Source: https://github.com/derHouwer/celata
+Comment:
+ The program is linked statically with third-party Rust crates and contains
+ flags from flag-icons (MIT) and icons from Lucide (ISC). Their licenses and
+ license texts are listed in /usr/share/doc/celata/THIRD-PARTY-LICENSES.md.gz.
+ The hide.me client is not part of this package.
+
+Files: *
+Copyright: 2026 derHouwer
+License: GPL-3.0-only
+
+License: GPL-3.0-only
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation, version 3 of the License.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ more details.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in "/usr/share/common-licenses/GPL-3".

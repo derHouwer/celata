@@ -1,0 +1,45 @@
+# Rules for cargo-deny: security advisories, licences and package sources.
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[advisories]
+# Every security advisory fails the check. Exceptions exist only for notices about unmaintained crates:
+# approved by the owner on 2026-11-06, checked again on 2026-11-14 (all six notices still apply, none
+# reports a vulnerability, all crates come in through Slint 1.18.1, the newest version). Check again with
+# every Slint update. Keep the same list in .cargo/audit.toml.
+ignore = [
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils: comes in through spin_on from slint-build and slint-macros, only at build time" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser: comes in through sctk-adwaita from winit, window frames under Wayland" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6, comes in through the accessibility support of Slint" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6, comes in through the accessibility support of Slint" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: belongs to zvariant, see there" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+# Celata is GPL-3.0-only, and Slint is used under GPL-3.0-only as well. Every other licence in this
+# list is compatible with the GPLv3.
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# The own crate celata-ui is included by path; Celata is not published on crates.io.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

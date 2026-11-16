@@ -1,0 +1,360 @@
+# German translation of the Celata interface.
+# The source texts (msgid) are English and stand in ui/*.slint as @tr("...").
+# Every msgid needs a translation here; the tests name what is missing.
+msgid ""
+msgstr ""
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "12+"
+msgstr "ab 12"
+
+msgid "18+"
+msgstr "ab 18"
+
+msgid "21+"
+msgstr "ab 21"
+
+msgid "Add"
+msgstr "Hinzufügen"
+
+msgid "Advanced"
+msgstr "Erweitert"
+
+msgid "All DNS requests via hide.me"
+msgstr "Alle DNS-Anfragen über hide.me"
+
+msgid "All locations"
+msgstr "Alle Standorte"
+
+msgid "Always allow"
+msgstr "Immer erlauben"
+
+msgid "Always block"
+msgstr "Immer sperren"
+
+msgid "Applies to Celata only. The VPN connection is not affected."
+msgstr "Gilt nur für Celata. Die VPN-Verbindung bleibt unberührt."
+
+msgid "Apply to all filters. * stands for any characters, e.g. *.example.com."
+msgstr "Gelten für alle Filter. * steht für beliebige Zeichen, z. B. *.example.com."
+
+msgid "Block"
+msgstr "Sperren"
+
+msgid "Block categories"
+msgstr "Kategorien sperren"
+
+msgid "Block illegal content"
+msgstr "Illegale Inhalte sperren"
+
+msgid "Block risky sites"
+msgstr "Riskante Seiten sperren"
+
+msgid "Blocks the internet while there is no VPN connection. If it is off, the overview shows a red notice."
+msgstr "Sperrt das Internet, solange keine VPN-Verbindung besteht. Ist sie aus, zeigt die Übersicht einen roten Hinweis."
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Choose location"
+msgstr "Standort wählen"
+
+msgid "Close Celata?"
+msgstr "Celata schließen?"
+
+msgid "Command for the terminal"
+msgstr "Befehl für die Konsole"
+
+msgid "Connect"
+msgstr "Verbinden"
+
+msgid "Connected"
+msgstr "Verbunden"
+
+msgid "Connecting …"
+msgstr "Wird verbunden …"
+
+msgid "Connection"
+msgstr "Verbindung"
+
+msgid "Connection to the hide.me server"
+msgstr "Verbindung zum hide.me-Server"
+
+msgid "Content"
+msgstr "Inhalte"
+
+msgid "Copy command"
+msgstr "Befehl kopieren"
+
+msgid "Copy link"
+msgstr "Link kopieren"
+
+msgid "Detect dropout after (s)"
+msgstr "Abbruch erkennen nach (s)"
+
+msgid "Devices on the internet can then open connections to this computer."
+msgstr "Geräte aus dem Internet können dann Verbindungen zu diesem Rechner aufbauen."
+
+msgid "Disconnect"
+msgstr "Trennen"
+
+msgid "Disconnect and close"
+msgstr "Trennen und schließen"
+
+msgid "DNS servers"
+msgstr "DNS-Server"
+
+msgid "DNS-over-HTTPS servers"
+msgstr "DNS-over-HTTPS-Server"
+
+msgid "Duration"
+msgstr "Dauer"
+
+msgid "Edit list"
+msgstr "Liste bearbeiten"
+
+msgid "Empty list: Celata only uses the fallback DNS servers."
+msgstr "Leere Liste: Celata nutzt nur die Rückfall-DNS-Server."
+
+msgid "Enforce safe search"
+msgstr "Sichere Suche erzwingen"
+
+msgid "Exceptions"
+msgstr "Ausnahmen"
+
+msgid "Fallback DNS servers"
+msgstr "Rückfall-DNS-Server"
+
+msgid "Filter ads"
+msgstr "Werbung filtern"
+
+msgid "Filter dangerous destinations"
+msgstr "Gefährliche Ziele filtern"
+
+msgid "Filter malware"
+msgstr "Schadsoftware filtern"
+
+msgid "Filter trackers"
+msgstr "Tracker filtern"
+
+msgid "Filters"
+msgstr "Filter"
+
+msgid "Filters are requested from hide.me when connecting; the service does not report a confirmation."
+msgstr "Filter werden beim Verbinden bei hide.me angefordert; eine Bestätigung meldet der Dienst nicht."
+
+msgid "Firewall mark (0 = none)"
+msgstr "Firewall-Markierung (0 = keine)"
+
+msgid "Fraud, phishing and similar sites."
+msgstr "Betrug, Phishing und ähnliche Seiten."
+
+msgid "free"
+msgstr "kostenlos"
+
+msgid "Free only"
+msgstr "Nur kostenlose"
+
+msgid "High risk"
+msgstr "Hohes Risiko"
+
+msgid "How Celata finds the address of the VPN server before connecting. hide.me assigns the DNS servers inside the tunnel."
+msgstr "Wie Celata vor dem Verbinden die Adresse des VPN-Servers findet. Die DNS-Server im Tunnel teilt hide.me zu."
+
+msgid "Inside the tunnel, the hide.me server answers every DNS request itself, even if a program asks another DNS server."
+msgstr "Der hide.me-Server beantwortet im Tunnel jede DNS-Anfrage selbst, auch wenn ein Programm einen anderen DNS-Server fragt."
+
+msgid "Intended for streaming. Some websites do not work through these servers."
+msgstr "Für Streaming gedacht. Manche Websites funktionieren über diese Server nicht."
+
+msgid "Interface name"
+msgstr "Schnittstellenname"
+
+msgid "Internet blocked"
+msgstr "Internet gesperrt"
+
+msgid "IP address, optionally with port. Without a port, 53 applies."
+msgstr "IP-Adresse, optional mit Port. Ohne Port gilt 53."
+
+msgid "IP version"
+msgstr "IP-Version"
+
+msgid "IPv4 and IPv6"
+msgstr "IPv4 und IPv6"
+
+msgid "IPv4 only"
+msgstr "Nur IPv4"
+
+msgid "IPv6 only"
+msgstr "Nur IPv6"
+
+msgid "Kill switch"
+msgstr "Internet-Sperre"
+
+msgid "Link to the Ko-fi page"
+msgstr "Link zur Ko-fi-Seite"
+
+msgid "Loading categories …"
+msgstr "Kategorien werden geladen …"
+
+msgid "Loading server list …"
+msgstr "Serverliste wird geladen …"
+
+msgid "Location"
+msgstr "Standort"
+
+msgid "Location: {}"
+msgstr "Standort: {}"
+
+msgid "Locations"
+msgstr "Standorte"
+
+msgid "Medium and up"
+msgstr "Ab mittlerem"
+
+msgid "More filters"
+msgstr "Weitere Filter"
+
+msgid "Network of this computer"
+msgstr "Netzwerk dieses Rechners"
+
+msgid "Networks outside the VPN"
+msgstr "Netze am VPN vorbei"
+
+msgid "No entries."
+msgstr "Keine Einträge."
+
+msgid "No results"
+msgstr "Keine Treffer"
+
+msgid "No server selected"
+msgstr "Kein Server ausgewählt"
+
+msgid "Off"
+msgstr "Aus"
+
+msgid "Only change these if you know what the value does: wrong values can disrupt the network and DNS of this computer."
+msgstr "Nur ändern, wenn du weißt, was der Wert bewirkt: Falsche Werte können Netzwerk und DNS dieses Rechners stören."
+
+msgid "Overview"
+msgstr "Übersicht"
+
+msgid "Parental control"
+msgstr "Jugendschutz"
+
+msgid "Port forwarding (uPnP, NAT-PMP)"
+msgstr "Port-Weiterleitung (uPnP, NAT-PMP)"
+
+msgid "Possible and up"
+msgstr "Ab möglichem"
+
+msgid "Public"
+msgstr "Öffentlich"
+
+msgid "Received"
+msgstr "Empfangen"
+
+msgid "Reconnect after (s)"
+msgstr "Neu verbinden nach (s)"
+
+msgid "Remove"
+msgstr "Entfernen"
+
+msgid "Remove: {}"
+msgstr "Entfernen: {}"
+
+msgid "Request timeout (s)"
+msgstr "Wartezeit für Anfragen (s)"
+
+msgid "Reset advanced to defaults"
+msgstr "Erweitert auf Standard zurücksetzen"
+
+msgid "Reset all settings to defaults"
+msgstr "Alle Einstellungen auf Standard zurücksetzen"
+
+msgid "resolv.conf backup (empty = none)"
+msgstr "Sicherung von resolv.conf (leer = keine)"
+
+msgid "Resolving the VPN server name"
+msgstr "Namensauflösung des VPN-Servers"
+
+msgid "Routing table"
+msgstr "Routing-Tabelle"
+
+msgid "Rule priority"
+msgstr "Regel-Priorität"
+
+msgid "Search category"
+msgstr "Kategorie suchen"
+
+msgid "Search category, e.g. gambling"
+msgstr "Kategorie suchen, z. B. gambling"
+
+msgid "Search country, city or server"
+msgstr "Land, Stadt oder Server suchen"
+
+msgid "Search engines show only filtered results."
+msgstr "Suchmaschinen zeigen nur gefilterte Ergebnisse."
+
+msgid "Search for a category and block it. Names and descriptions come from hide.me and are in English."
+msgstr "Suche eine Kategorie und sperre sie. Namen und Beschreibungen stammen von hide.me und sind englisch."
+
+msgid "Selected: {}"
+msgstr "Ausgewählt: {}"
+
+msgid "Sent"
+msgstr "Gesendet"
+
+msgid "Server as DNS stamp (sdns://…)"
+msgstr "Server als DNS-Stamp (sdns://…)"
+
+msgid "Server port"
+msgstr "Server-Port"
+
+msgid "Server: {}"
+msgstr "Server: {}"
+
+msgid "Settings"
+msgstr "Einstellungen"
+
+msgid "Split tunneling"
+msgstr "Split-Tunnel"
+
+msgid "Standard"
+msgstr "Standard"
+
+msgid "Streaming"
+msgstr "Streaming"
+
+msgid "Switching …"
+msgstr "Wird gewechselt …"
+
+msgid "Traffic to these networks does not go through the VPN, e.g. 192.168.1.0/24 for the home network."
+msgstr "Verkehr in diese Netze läuft nicht durch das VPN, z. B. 192.168.1.0/24 für das Heimnetz."
+
+msgid "Try again"
+msgstr "Erneut versuchen"
+
+msgid "Unblock internet"
+msgstr "Sperre aufheben"
+
+msgid "Unblock internet?"
+msgstr "Sperre aufheben?"
+
+msgid "Use DNS over HTTPS"
+msgstr "DNS-over-HTTPS verwenden"
+
+msgid "VPN address"
+msgstr "VPN-Adresse"
+
+msgid "Warez, spyware, copyright infringements and other illegal content."
+msgstr "Warez, Spyware, Urheberrechtsverletzungen und andere illegale Inhalte."
+
+msgid "WireGuard port (0 = automatic)"
+msgstr "WireGuard-Port (0 = automatisch)"
+
+msgid "{}: new entry"
+msgstr "{}: neuer Eintrag"

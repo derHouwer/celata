@@ -1,0 +1,13 @@
+# Approved by the owner on 2026-11-06, checked again on 2026-11-14; check again with every Slint update.
+# The reasons are in deny.toml, except for bincode:
+# RUSTSEC-2025-0141 (bincode) is only listed in Cargo.lock and is not part of the Linux program.
+# cargo-deny therefore does not report it at all, and deny.toml does not list it.
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0441",
+    "RUSTSEC-2026-0192",
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0372",
+    "RUSTSEC-2025-0141",
+]

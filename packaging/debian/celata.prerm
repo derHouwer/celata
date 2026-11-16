@@ -1,0 +1,16 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 derHouwer
+#
+# Removing the package stops the service (which lifts an internet block) and disables it. An update leaves
+# a running, enabled service alone.
+set -e
+
+if [ "$1" = remove ]; then
+    if [ -d /run/systemd/system ]; then
+        deb-systemd-invoke stop celata-hide.me.service >/dev/null || true
+    fi
+    systemctl --no-reload disable celata-hide.me.service >/dev/null 2>&1 || true
+fi
+
+#DEBHELPER#

@@ -1,0 +1,833 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 derHouwer
+
+// View "Settings". No section "Lab Preview": hide.me v0.9.14 does not know MultiHop.
+// Checking, classifying and saving is done by `src/settings.rs`; only the presentation is here.
+// Structure: few, combined controls, sub-items with a heading, long lists behind "Edit list".
+
+import { ComboBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import {
+    Card, ChoiceRow, DonationTexts, Expander, Explanation, Field, FieldError, ListEditor, SecondaryButton,
+    SectionTitle, Subheading, Toggle,
+} from "widgets.slint";
+
+// Display values of the stored set; numbers as text.
+export struct SettingsForm {
+    ads: bool,
+    trackers: bool,
+    malware: bool,
+    malicious: bool,
+    // 0 = off, 1 = 12+, 2 = 18+, 3 = 21+
+    pg: int,
+    safe-search: bool,
+    // 0 = off, 1 = high risk, 2 = medium and up, 3 = possible and up
+    risk-level: int,
+    illegal: bool,
+    whitelist: [string],
+    blacklist: [string],
+    force-dns: bool,
+    use-doh: bool,
+    plain-dns: [string],
+    split-tunnel: [string],
+    port-forward: bool,
+    kill-switch: bool,
+    // 0 = both, 1 = IPv4 only, 2 = IPv6 only
+    ip-version: int,
+    port: string,
+    dpd-secs: string,
+    rest-timeout-secs: string,
+    reconnect-wait-secs: string,
+    interface: string,
+    listen-port: string,
+    mark: string,
+    routing-table: string,
+    rule-priority: string,
+    resolv-backup: string,
+    doh-servers: [string],
+    // "18 servers from Quad9 (hide.me default)." or similar
+    doh-summary: string,
+    // Counts up when all input fields should show the stored value again (reset, cancel), even if it
+    // has not changed.
+    revision: int,
+}
+
+// Error text per field, empty = fine.
+export struct SettingsErrors {
+    general: string,
+    filter: string,
+    whitelist: string,
+    blacklist: string,
+    plain-dns: string,
+    split-tunnel: string,
+    ip-version: string,
+    port: string,
+    dpd-secs: string,
+    rest-timeout-secs: string,
+    reconnect-wait-secs: string,
+    interface: string,
+    listen-port: string,
+    mark: string,
+    routing-table: string,
+    rule-priority: string,
+    resolv-backup: string,
+    doh-servers: string,
+}
+
+export struct CategoryRow {
+    name: string,
+    description: string,
+    selected: bool,
+}
+
+// A category with name, description and a button on the right.
+component CategoryLine inherits HorizontalLayout {
+    in property <CategoryRow> category;
+    in property <string> action;
+    in property <bool> danger;
+    callback clicked();
+
+    spacing: 8px;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        alignment: center;
+        spacing: 2px;
+
+        Text {
+            text: root.category.name;
+            font-size: 14px;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+
+        if root.category.description != "": Explanation {
+            text: root.category.description;
+        }
+    }
+
+    VerticalLayout {
+        alignment: center;
+
+        SecondaryButton {
+            text: root.action;
+            danger: root.danger;
+            accessible-label: root.action + ": " + root.category.name;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+}
+
+export component SettingsView inherits VerticalLayout {
+    in property <SettingsForm> settings;
+    in property <SettingsErrors> errors;
+    in property <string> state;
+    in property <string> file-notice;
+    // Hits of the category search
+    in property <[CategoryRow]> categories;
+    // Blocked categories
+    in property <[CategoryRow]> blocked-categories;
+    // "loading", "ready" or "error"
+    in property <string> categories-state;
+    in property <string> categories-message;
+    // False: the filter settings have no effect with the approved version of hide.me and are not offered
+    // (`settings::FILTERS_WORK`).
+    in property <bool> filters-available;
+    // Section "Support Celata". It does not belong to the settings of the service and therefore takes
+    // part neither in `setting-toggled` nor in `settings-reset` nor in `SettingsForm`.
+    in property <bool> donation-hint;
+    in property <DonationTexts> donation-texts;
+    callback donation-hint-toggled(bool);
+    callback donate();
+    // Section "Sprache · Language". It belongs to Celata only: never sent to the service, no reconnect.
+    // Drop-down list: names in their own spelling in the order of `Language::ALL`, position of the language
+    // in force; the callback only reports the selected position.
+    in property <[string]> language-names;
+    in property <int> language-index;
+    callback language-chosen(int);
+
+    callback setting-toggled(string, bool);
+    callback setting-choice(string, string);
+    callback setting-text(string, string);
+    callback list-add(string, string);
+    callback list-remove(string, int);
+    callback settings-reset(string);
+    callback open-more-filters();
+    callback category-search(string);
+
+    spacing: 16px;
+    alignment: start;
+
+    Text {
+        text: @tr("Settings");
+        font-size: Theme.page-title;
+        font-weight: 600;
+        color: Theme.text;
+    }
+
+    // First section, so that it can be found from a foreign language as well.
+    Card {
+        VerticalLayout {
+            padding: 20px;
+            spacing: 8px;
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+
+                VerticalLayout {
+                    alignment: center;
+                    Image {
+                        source: @image-url("icons/globe.svg");
+                        width: 20px;
+                        height: 20px;
+                        colorize: Theme.accent;
+                        accessible-role: none;
+                    }
+                }
+
+                // The same in all languages, therefore without @tr.
+                SectionTitle {
+                    text: "Sprache · Language";
+                }
+            }
+
+            Explanation {
+                text: @tr("Applies to Celata only. The VPN connection is not affected.");
+            }
+
+            // A drop-down list instead of single buttons, so that many languages stay clear as well.
+            // The `ComboBox` brings keyboard and screen reader support along.
+            HorizontalLayout {
+                alignment: start;
+
+                ComboBox {
+                    min-width: 240px;
+                    model: root.language-names;
+                    current-index: root.language-index;
+                    accessible-label: "Sprache · Language";
+                    selected(value) => {
+                        root.language-chosen(self.current-index);
+                    }
+                }
+            }
+        }
+    }
+
+    if root.state != "": Text {
+        text: root.state;
+        font-size: 13px;
+        color: Theme.text-soft;
+        wrap: word-wrap;
+    }
+
+    if root.file-notice != "": Text {
+        text: root.file-notice;
+        font-size: 13px;
+        font-weight: 600;
+        color: Theme.tone-alert;
+        wrap: word-wrap;
+    }
+
+    if root.errors.general != "": FieldError {
+        text: root.errors.general;
+    }
+
+    // --- Filters, only if the filters work ---
+    if root.filters-available: Card {
+        VerticalLayout {
+            padding: 20px;
+            spacing: 8px;
+
+            SectionTitle {
+                text: @tr("Filters");
+            }
+
+            Explanation {
+                text: @tr("Filters are requested from hide.me when connecting; the service does not report a confirmation.");
+            }
+
+            Toggle {
+                text: @tr("Filter ads");
+                checked: root.settings.ads;
+                toggled(on) => {
+                    root.setting-toggled("ads", on);
+                }
+            }
+
+            Toggle {
+                text: @tr("Filter trackers");
+                checked: root.settings.trackers;
+                toggled(on) => {
+                    root.setting-toggled("trackers", on);
+                }
+            }
+
+            Toggle {
+                text: @tr("Filter malware");
+                checked: root.settings.malware;
+                toggled(on) => {
+                    root.setting-toggled("malware", on);
+                }
+            }
+
+            Toggle {
+                text: @tr("Filter dangerous destinations");
+                description: @tr("Fraud, phishing and similar sites.");
+                checked: root.settings.malicious;
+                toggled(on) => {
+                    root.setting-toggled("malicious", on);
+                }
+            }
+
+            more := Expander {
+                title: @tr("More filters");
+                toggled(open) => {
+                    if (open) {
+                        root.open-more-filters();
+                    }
+                }
+            }
+
+            // Instead of `if more.open:` always present and only shown or hidden: in a conditional block
+            // Slint measures wrapping texts as a single line only, and the content then overlaps the end of
+            // the card. The Tab key skips hidden elements.
+            VerticalLayout {
+                visible: more.open;
+                height: more.open ? self.preferred-height : 0px;
+                spacing: 12px;
+                padding-left: 24px;
+
+                // Content
+                Subheading {
+                    text: @tr("Content");
+                }
+
+                ChoiceRow {
+                    label: @tr("Parental control");
+                    labels: [@tr("Off"), @tr("12+"), @tr("18+"), @tr("21+")];
+                    current: root.settings.pg;
+                    chosen(index) => {
+                        root.setting-choice("pg", index == 1 ? "12" : index == 2 ? "18" : index == 3 ? "21" : "0");
+                    }
+                }
+
+                ChoiceRow {
+                    label: @tr("Block risky sites");
+                    labels: [@tr("Off"), @tr("High risk"), @tr("Medium and up"), @tr("Possible and up")];
+                    current: root.settings.risk-level;
+                    chosen(index) => {
+                        root.setting-choice("risk_level", index == 1 ? "1" : index == 2 ? "2" : index == 3 ? "3" : "0");
+                    }
+                }
+
+                Toggle {
+                    text: @tr("Enforce safe search");
+                    description: @tr("Search engines show only filtered results.");
+                    checked: root.settings.safe-search;
+                    toggled(on) => {
+                        root.setting-toggled("safe_search", on);
+                    }
+                }
+
+                Toggle {
+                    text: @tr("Block illegal content");
+                    description: @tr("Warez, spyware, copyright infringements and other illegal content.");
+                    checked: root.settings.illegal;
+                    toggled(on) => {
+                        root.setting-toggled("illegal", on);
+                    }
+                }
+
+                if root.errors.filter != "": FieldError {
+                    text: root.errors.filter;
+                }
+
+                // Categories: a search instead of 141 switches
+                Subheading {
+                    text: @tr("Block categories");
+                }
+
+                Explanation {
+                    text: @tr("Search for a category and block it. Names and descriptions come from hide.me and are in English.");
+                }
+
+                for category in root.blocked-categories: CategoryLine {
+                    category: category;
+                    action: @tr("Remove");
+                    clicked => {
+                        root.setting-choice("category", category.name);
+                    }
+                }
+
+                if root.categories-state == "loading": Explanation {
+                    text: @tr("Loading categories …");
+                }
+
+                if root.categories-state == "error": VerticalLayout {
+                    spacing: 6px;
+
+                    FieldError {
+                        text: root.categories-message;
+                    }
+
+                    HorizontalLayout {
+                        alignment: start;
+                        SecondaryButton {
+                            text: @tr("Try again");
+                            clicked => {
+                                root.open-more-filters();
+                            }
+                        }
+                    }
+                }
+
+                if root.categories-state == "ready": LineEdit {
+                    placeholder-text: @tr("Search category, e.g. gambling");
+                    accessible-label: @tr("Search category");
+                    edited(text) => {
+                        root.category-search(text);
+                    }
+                }
+
+                for category in root.categories: CategoryLine {
+                    category: category;
+                    action: @tr("Block");
+                    clicked => {
+                        root.setting-choice("category", category.name);
+                    }
+                }
+
+                // Exceptions
+                Subheading {
+                    text: @tr("Exceptions");
+                }
+
+                Explanation {
+                    text: @tr("Apply to all filters. * stands for any characters, e.g. *.example.com.");
+                }
+
+                ListEditor {
+
+                    revision: root.settings.revision;
+                    label: @tr("Always allow");
+                    placeholder: "example.com";
+                    items: root.settings.whitelist;
+                    error: root.errors.whitelist;
+                    add(text) => {
+                        root.list-add("whitelist", text);
+                    }
+                    remove(index) => {
+                        root.list-remove("whitelist", index);
+                    }
+                }
+
+                ListEditor {
+
+                    revision: root.settings.revision;
+                    label: @tr("Always block");
+                    placeholder: "example.com";
+                    items: root.settings.blacklist;
+                    error: root.errors.blacklist;
+                    add(text) => {
+                        root.list-add("blacklist", text);
+                    }
+                    remove(index) => {
+                        root.list-remove("blacklist", index);
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Split tunneling ---
+    Card {
+        VerticalLayout {
+            padding: 20px;
+            spacing: 8px;
+
+            SectionTitle {
+                text: @tr("Split tunneling");
+            }
+
+            ListEditor {
+
+                revision: root.settings.revision;
+                label: @tr("Networks outside the VPN");
+                hint: @tr("Traffic to these networks does not go through the VPN, e.g. 192.168.1.0/24 for the home network.");
+                placeholder: "192.168.1.0/24";
+                items: root.settings.split-tunnel;
+                error: root.errors.split-tunnel;
+                add(text) => {
+                    root.list-add("split_tunnel", text);
+                }
+                remove(index) => {
+                    root.list-remove("split_tunnel", index);
+                }
+            }
+        }
+    }
+
+    // --- DNS ---
+    Card {
+        VerticalLayout {
+            padding: 20px;
+            spacing: 8px;
+
+            SectionTitle {
+                text: "DNS";
+            }
+
+            // Technically a filter (`forceDns`), therefore only together with the filters
+            if root.filters-available: Toggle {
+                text: @tr("All DNS requests via hide.me");
+                description: @tr("Inside the tunnel, the hide.me server answers every DNS request itself, even if a program asks another DNS server.");
+                checked: root.settings.force-dns;
+                toggled(on) => {
+                    root.setting-toggled("force_dns", on);
+                }
+            }
+
+            Subheading {
+                text: @tr("Resolving the VPN server name");
+            }
+
+            Explanation {
+                text: @tr("How Celata finds the address of the VPN server before connecting. hide.me assigns the DNS servers inside the tunnel.");
+            }
+
+            Toggle {
+                text: @tr("Use DNS over HTTPS");
+                checked: root.settings.use-doh;
+                toggled(on) => {
+                    root.setting-toggled("use_doh", on);
+                }
+            }
+
+            ListEditor {
+
+                revision: root.settings.revision;
+                label: @tr("Fallback DNS servers");
+                hint: @tr("IP address, optionally with port. Without a port, 53 applies.");
+                placeholder: "9.9.9.9:53";
+                items: root.settings.plain-dns;
+                error: root.errors.plain-dns;
+                add(text) => {
+                    root.list-add("plain_dns", text);
+                }
+                remove(index) => {
+                    root.list-remove("plain_dns", index);
+                }
+            }
+        }
+    }
+
+    // --- Connection ---
+    Card {
+        VerticalLayout {
+            padding: 20px;
+            spacing: 8px;
+
+            SectionTitle {
+                text: @tr("Connection");
+            }
+
+            Toggle {
+                text: @tr("Kill switch");
+                description: @tr("Blocks the internet while there is no VPN connection. If it is off, the overview shows a red notice.");
+                checked: root.settings.kill-switch;
+                toggled(on) => {
+                    root.setting-toggled("kill_switch", on);
+                }
+            }
+
+            Toggle {
+                text: @tr("Port forwarding (uPnP, NAT-PMP)");
+                description: @tr("Devices on the internet can then open connections to this computer.");
+                checked: root.settings.port-forward;
+                toggled(on) => {
+                    root.setting-toggled("port_forward", on);
+                }
+            }
+
+            advanced := Expander {
+                title: @tr("Advanced");
+            }
+
+            // Instead of `if advanced.open:` always present and only shown or hidden: in a conditional block
+            // Slint measures wrapping texts as a single line only, and the content then overlaps the end of
+            // the card. The Tab key skips hidden elements.
+            VerticalLayout {
+                visible: advanced.open;
+                height: advanced.open ? self.preferred-height : 0px;
+                spacing: 12px;
+                padding-left: 24px;
+
+                FieldError {
+                    text: @tr("Only change these if you know what the value does: wrong values can disrupt the network and DNS of this computer.");
+                }
+
+                // Connection to the server
+                Subheading {
+                    text: @tr("Connection to the hide.me server");
+                }
+
+                ChoiceRow {
+                    label: @tr("IP version");
+                    labels: [@tr("IPv4 and IPv6"), @tr("IPv4 only"), @tr("IPv6 only")];
+                    current: root.settings.ip-version;
+                    chosen(index) => {
+                        root.setting-choice("ip_version", index == 1 ? "v4" : index == 2 ? "v6" : "both");
+                    }
+                }
+
+                if root.errors.ip-version != "": FieldError {
+                    text: root.errors.ip-version;
+                }
+
+                // Rows instead of a grid: with wrapping error messages a grid only reckons with one line, and
+                // the card then does not grow along.
+                VerticalLayout {
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        spacing: 16px;
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("Server port");
+                            value: root.settings.port;
+                            error: root.errors.port;
+                            accepted(text) => {
+                                root.setting-text("port", text);
+                            }
+                        }
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("Detect dropout after (s)");
+                            value: root.settings.dpd-secs;
+                            error: root.errors.dpd-secs;
+                            accepted(text) => {
+                                root.setting-text("dpd_secs", text);
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 16px;
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("Request timeout (s)");
+                            value: root.settings.rest-timeout-secs;
+                            error: root.errors.rest-timeout-secs;
+                            accepted(text) => {
+                                root.setting-text("rest_timeout_secs", text);
+                            }
+                        }
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("Reconnect after (s)");
+                            value: root.settings.reconnect-wait-secs;
+                            error: root.errors.reconnect-wait-secs;
+                            accepted(text) => {
+                                root.setting-text("reconnect_wait_secs", text);
+                            }
+                        }
+                    }
+                }
+
+                // Network of this computer
+                Subheading {
+                    text: @tr("Network of this computer");
+                }
+
+                // Rows instead of a grid: with wrapping error messages a grid only reckons with one line, and
+                // the card then does not grow along.
+                VerticalLayout {
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        spacing: 16px;
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("Interface name");
+                            value: root.settings.interface;
+                            error: root.errors.interface;
+                            accepted(text) => {
+                                root.setting-text("interface", text);
+                            }
+                        }
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("WireGuard port (0 = automatic)");
+                            value: root.settings.listen-port;
+                            error: root.errors.listen-port;
+                            accepted(text) => {
+                                root.setting-text("listen_port", text);
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 16px;
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("Routing table");
+                            value: root.settings.routing-table;
+                            error: root.errors.routing-table;
+                            accepted(text) => {
+                                root.setting-text("routing_table", text);
+                            }
+                        }
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("Rule priority");
+                            value: root.settings.rule-priority;
+                            error: root.errors.rule-priority;
+                            accepted(text) => {
+                                root.setting-text("rule_priority", text);
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 16px;
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("Firewall mark (0 = none)");
+                            value: root.settings.mark;
+                            error: root.errors.mark;
+                            accepted(text) => {
+                                root.setting-text("mark", text);
+                            }
+                        }
+
+                        Field {
+
+                            revision: root.settings.revision;
+                            label: @tr("resolv.conf backup (empty = none)");
+                            value: root.settings.resolv-backup;
+                            error: root.errors.resolv-backup;
+                            accepted(text) => {
+                                root.setting-text("resolv_backup", text);
+                            }
+                        }
+                    }
+                }
+
+                // DNS-over-HTTPS servers: long list only when needed
+                Subheading {
+                    text: @tr("DNS-over-HTTPS servers");
+                }
+
+                Explanation {
+                    text: root.settings.doh-summary;
+                }
+
+                if root.errors.doh-servers != "" && !doh-list.open: FieldError {
+                    text: root.errors.doh-servers;
+                }
+
+                doh-list := Expander {
+                    title: @tr("Edit list");
+                }
+
+                // As with "Advanced": shown and hidden instead of `if`.
+                ListEditor {
+                    visible: doh-list.open;
+                    height: doh-list.open ? self.preferred-height : 0px;
+                    revision: root.settings.revision;
+                    label: @tr("Server as DNS stamp (sdns://…)");
+                    hint: @tr("Empty list: Celata only uses the fallback DNS servers.");
+                    placeholder: "sdns://…";
+                    items: root.settings.doh-servers;
+                    error: root.errors.doh-servers;
+                    add(text) => {
+                        root.list-add("doh_servers", text);
+                    }
+                    remove(index) => {
+                        root.list-remove("doh_servers", index);
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: start;
+                    SecondaryButton {
+                        text: @tr("Reset advanced to defaults");
+                        clicked => {
+                            root.settings-reset("advanced");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        alignment: start;
+        SecondaryButton {
+            text: @tr("Reset all settings to defaults");
+            clicked => {
+                root.settings-reset("all");
+            }
+        }
+    }
+
+    // --- Support Celata ---
+    // Last section, below the reset: it has nothing to do with the connection.
+    Card {
+        VerticalLayout {
+            padding: 20px;
+            spacing: 8px;
+
+            SectionTitle {
+                text: root.donation-texts.section-title;
+            }
+
+            Explanation {
+                text: root.donation-texts.section-text;
+            }
+
+            Toggle {
+                text: root.donation-texts.toggle;
+                description: root.donation-texts.toggle-description;
+                checked: root.donation-hint;
+                toggled(on) => {
+                    root.donation-hint-toggled(on);
+                }
+            }
+
+            // Always there, even with the card hidden
+            HorizontalLayout {
+                alignment: start;
+                SecondaryButton {
+                    text: root.donation-texts.button;
+                    label: root.donation-texts.button-label;
+                    icon: @image-url("icons/heart.svg");
+                    clicked => {
+                        root.donate();
+                    }
+                }
+            }
+        }
+    }
+}

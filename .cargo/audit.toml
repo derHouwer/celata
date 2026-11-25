@@ -1,5 +1,8 @@
-# Approved by the owner on 2026-11-06, checked again on 2026-11-14; check again with every Slint update.
-# The reasons are in deny.toml, except for bincode:
+# Approved by the owner on 2026-11-06, checked again on 2026-11-14 and on 2026-11-25; RUSTSEC-2026-0543 (chrono)
+# approved on 2026-11-18. Check again with every Slint update.
+# The reasons are in deny.toml (zvariant, zbus_names and zvariant_derive: used by the accessibility support of
+# Slint and through zbus 5, which Celata uses for the session and system bus; only zbus 6 replaces them),
+# except for bincode:
 # RUSTSEC-2025-0141 (bincode) is only listed in Cargo.lock and is not part of the Linux program.
 # cargo-deny therefore does not report it at all, and deny.toml does not list it.
 [advisories]
@@ -9,5 +12,6 @@ ignore = [
     "RUSTSEC-2026-0370",
     "RUSTSEC-2026-0371",
     "RUSTSEC-2026-0372",
+    "RUSTSEC-2026-0543",
     "RUSTSEC-2025-0141",
 ]

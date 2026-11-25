@@ -147,6 +147,21 @@ export component SettingsView inherits VerticalLayout {
     in property <[string]> language-names;
     in property <int> language-index;
     callback language-chosen(int);
+    // Section "Application": Celata's own behaviour. Never sent to the service, no reconnect; Rust saves at once.
+    in property <bool> notifications;
+    in property <bool> keep-running;
+    // State of the own autostart entry; with a foreign entry the switch is off and cannot be used.
+    in property <bool> autostart;
+    in property <bool> autostart-foreign;
+    // Notice about a foreign entry with its path, from Rust; empty: none.
+    in property <string> autostart-note;
+    // The icon is in the system tray; otherwise closing quits Celata anyway.
+    in property <bool> tray-shown: true;
+    in property <bool> update-check;
+    callback notifications-toggled(bool);
+    callback keep-running-toggled(bool);
+    callback autostart-toggled(bool);
+    callback update-check-toggled(bool);
 
     callback setting-toggled(string, bool);
     callback setting-choice(string, string);
@@ -183,7 +198,7 @@ export component SettingsView inherits VerticalLayout {
                         source: @image-url("icons/globe.svg");
                         width: 20px;
                         height: 20px;
-                        colorize: Theme.accent;
+                        colorize: Theme.accent-fg;
                         accessible-role: none;
                     }
                 }
@@ -216,6 +231,81 @@ export component SettingsView inherits VerticalLayout {
         }
     }
 
+    // --- Application ---
+    // Right after the language: the other settings of Celata itself, apart from those of the service.
+    Card {
+        VerticalLayout {
+            padding: 20px;
+            spacing: 8px;
+
+            SectionTitle {
+                text: @tr("Application");
+            }
+
+            Toggle {
+                text: @tr("Show notifications");
+                description: @tr("Reports connection changes while the window is not in front.");
+                checked: root.notifications;
+                toggled(on) => {
+                    root.notifications-toggled(on);
+                }
+            }
+
+            VerticalLayout {
+                Toggle {
+                    text: @tr("Keep running after closing");
+                    description: @tr("Closing the window leaves Celata in the system tray. Quit it from the tray menu.");
+                    checked: root.keep-running;
+                    toggled(on) => {
+                        root.keep-running-toggled(on);
+                    }
+                }
+
+                // Shown and hidden with `visible`/`height`: in an `if` block Slint measures wrapping text as one line.
+                HorizontalLayout {
+                    padding-left: 52px;
+                    visible: !root.tray-shown;
+                    height: root.tray-shown ? 0px : self.preferred-height;
+
+                    Explanation {
+                        text: @tr("No system tray icon: closing quits Celata.");
+                    }
+                }
+            }
+
+            VerticalLayout {
+                Toggle {
+                    text: @tr("Start at login");
+                    description: @tr("Celata starts after you log in, without connecting.");
+                    checked: root.autostart;
+                    enabled: !root.autostart-foreign;
+                    toggled(on) => {
+                        root.autostart-toggled(on);
+                    }
+                }
+
+                HorizontalLayout {
+                    padding-left: 52px;
+                    visible: root.autostart-note != "";
+                    height: root.autostart-note == "" ? 0px : self.preferred-height;
+
+                    Explanation {
+                        text: root.autostart-note;
+                    }
+                }
+            }
+
+            Toggle {
+                text: @tr("Check for new versions");
+                description: @tr("Asks GitHub once at start and once a day. Without VPN, GitHub sees your public address.");
+                checked: root.update-check;
+                toggled(on) => {
+                    root.update-check-toggled(on);
+                }
+            }
+        }
+    }
+
     if root.state != "": Text {
         text: root.state;
         font-size: 13px;
@@ -227,7 +317,7 @@ export component SettingsView inherits VerticalLayout {
         text: root.file-notice;
         font-size: 13px;
         font-weight: 600;
-        color: Theme.tone-alert;
+        color: Theme.alert-fg;
         wrap: word-wrap;
     }
 

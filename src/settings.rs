@@ -767,6 +767,38 @@ pub fn config_path() -> Option<PathBuf> {
     )
 }
 
+/// Appearance of the window: light (the default, also for the first start and for any unreadable value) or
+/// dark. Only the user changes it, with the button in the header; Celata never follows the desktop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Appearance {
+    #[default]
+    Light,
+    Dark,
+}
+
+impl Appearance {
+    /// The word in the file.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    pub fn is_dark(self) -> bool {
+        self == Self::Dark
+    }
+
+    /// Only the word `dark` (ignoring spaces and case) means dark; any other text means light.
+    fn from_text(text: &str) -> Self {
+        if text.trim().eq_ignore_ascii_case("dark") {
+            Self::Dark
+        } else {
+            Self::Light
+        }
+    }
+}
+
 /// Settings for Celata itself only. Never part of [`Settings`] and never sent to the service:
 /// `to_service_json`, `changed_fields`, `reset_all` and `PendingChange` do not know this type.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -778,15 +810,58 @@ pub struct AppSettings {
     /// unknown, English applies without the loading failing.
     #[serde(serialize_with = "write_language", deserialize_with = "read_language")]
     pub language: Language,
+    /// Appearance of the window. In the file `"light"` or `"dark"`; if it is missing or anything else, light
+    /// applies without the loading failing and without touching the other settings.
+    #[serde(serialize_with = "write_appearance", deserialize_with = "read_appearance")]
+    pub appearance: Appearance,
+    /// Favourite locations as host names, newest first (`favorites::toggle`). Read leniently: only valid,
+    /// distinct host names count, at most [`MAX_FAVORITES`]; anything else is skipped without the loading
+    /// failing.
+    #[serde(deserialize_with = "read_favorites")]
+    pub favorites: Vec<String>,
+    /// Desktop notifications about the connection while the window is not in front (default: on).
+    pub notifications: bool,
+    /// Closing the window leaves Celata running with its icon in the system tray (default: off).
+    pub keep_running: bool,
+    /// Ask GitHub for a newer version at start and once a day (default: off; GitHub sees the public address
+    /// without VPN).
+    pub update_check: bool,
 }
+
+/// Most favourites that are read from the file. Keeps the file far below `MAX_FILE` (256 host names are
+/// about 16 KiB); there are about 130 locations.
+pub const MAX_FAVORITES: usize = 256;
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             donation_hint: true,
             language: Language::default(),
+            appearance: Appearance::default(),
+            favorites: Vec::new(),
+            notifications: true,
+            keep_running: false,
+            update_check: false,
         }
     }
+}
+
+/// Accepts any JSON value; only a list counts. From it only strings that are valid host names after
+/// trimming and lower case; the first of several equal ones stays; at most [`MAX_FAVORITES`].
+fn read_favorites<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let mut favorites: Vec<String> = Vec::new();
+    for item in value.as_array().map(Vec::as_slice).unwrap_or_default() {
+        if favorites.len() >= MAX_FAVORITES {
+            break;
+        }
+        if let Some(host) = item.as_str().and_then(crate::favorites::normalize)
+            && !favorites.contains(&host)
+        {
+            favorites.push(host);
+        }
+    }
+    Ok(favorites)
 }
 
 #[expect(
@@ -801,6 +876,20 @@ fn write_language<S: serde::Serializer>(language: &Language, serializer: S) -> R
 fn read_language<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Language, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
     Ok(value.as_str().and_then(Language::from_code).unwrap_or_default())
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde calls `serialize_with` functions with a reference"
+)]
+fn write_appearance<S: serde::Serializer>(appearance: &Appearance, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(appearance.code())
+}
+
+/// Accepts any JSON value; only the text `dark` counts as dark, everything else is light.
+fn read_appearance<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Appearance, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_str().map(Appearance::from_text).unwrap_or_default())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2735,6 +2824,61 @@ mod tests {
         assert!(!again.app.donation_hint);
     }
 
+    // --- Switches of the section "Application" ---
+
+    #[test]
+    fn neue_schalter_haben_ihre_standardwerte() {
+        let app = AppSettings::default();
+        assert!(app.notifications);
+        assert!(!app.keep_running);
+        assert!(!app.update_check);
+        for loaded in [
+            app_aus("{}"),
+            app_aus(r#"{"donation_hint":false,"language":"de","favorites":["berlin.hideservers.net"]}"#),
+        ] {
+            assert!(loaded.app.notifications);
+            assert!(!loaded.app.keep_running);
+            assert!(!loaded.app.update_check);
+            assert_eq!(loaded.notice, None);
+        }
+        assert!(load(Some(&temp_file("fehlt.json"))).app.notifications);
+    }
+
+    #[test]
+    fn neue_schalter_bleiben_gespeichert_und_lassen_den_rest_stehen() {
+        let path = alte_datei(&mit_filtern());
+        let loaded = load(Some(&path));
+        let app = AppSettings {
+            donation_hint: false,
+            language: Language::De,
+            appearance: Appearance::Dark,
+            favorites: vec!["berlin.hideservers.net".into(), "best".into()],
+            notifications: false,
+            keep_running: true,
+            update_check: true,
+        };
+        save(&path, &loaded.settings, &loaded.kept, &app).unwrap();
+        let again = load(Some(&path));
+        assert_eq!(again.app, app);
+        assert_eq!(again.settings, loaded.settings);
+        assert_eq!(again.kept, loaded.kept);
+        let file: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(file["version"], 1);
+        assert_eq!(file["app"]["keep_running"], true);
+        assert_eq!(file["app"]["update_check"], true);
+        assert_eq!(file["app"]["notifications"], false);
+        assert!(file["settings"].get("keep_running").is_none());
+    }
+
+    #[test]
+    fn einzelne_neue_schalter_aus_der_datei() {
+        let loaded = app_aus(r#"{"keep_running":true}"#);
+        assert!(loaded.app.keep_running && loaded.app.notifications && !loaded.app.update_check);
+        let loaded = app_aus(r#"{"notifications":false,"update_check":true}"#);
+        assert!(!loaded.app.notifications && loaded.app.update_check && !loaded.app.keep_running);
+        assert!(loaded.app.donation_hint);
+    }
+
     // --- Stored language ---
 
     fn app_aus(app: &str) -> Loaded {
@@ -2858,5 +3002,216 @@ mod tests {
         let body = to_service_json(&loaded.settings, "de.hideservers.net");
         assert!(!body.contains("language"), "{body}");
         assert!(!body.contains("\"de\""), "{body}");
+    }
+
+    // --- Favourites (feature 012) ---
+
+    #[test]
+    fn ohne_favoriten_ist_die_liste_leer() {
+        assert!(app_aus("{}").app.favorites.is_empty());
+        for value in ["null", "42", r#""de.hideservers.net""#, r#"{"a":1}"#, "true"] {
+            let loaded = app_aus(&format!(
+                r#"{{"donation_hint":false,"language":"de","favorites":{value}}}"#
+            ));
+            assert!(loaded.app.favorites.is_empty(), "{value}");
+            assert!(!loaded.app.donation_hint, "{value}");
+            assert_eq!(loaded.app.language, Language::De, "{value}");
+            assert_eq!(loaded.settings, ohne_filter(), "{value}");
+            assert_eq!(loaded.notice, None, "{value}");
+        }
+    }
+
+    #[test]
+    fn ungueltige_und_doppelte_favoriten_fallen_weg() {
+        let loaded = app_aus(
+            r#"{"language":"de","favorites":["b.hideservers.net", 7, null, "x.example.org", " A.HideServers.net ",
+               "b.hideservers.net", "", ["c.hideservers.net"], "a.hideservers.net", "a b.hideservers.net"]}"#,
+        );
+        assert_eq!(loaded.app.favorites, ["b.hideservers.net", "a.hideservers.net"]);
+        assert_eq!(loaded.app.language, Language::De);
+        assert_eq!(loaded.notice, None);
+    }
+
+    #[test]
+    fn hoechstens_256_favoriten_werden_gelesen() {
+        let many: Vec<String> = (0..300).map(|n| format!("\"s{n}.hideservers.net\"")).collect();
+        let loaded = app_aus(&format!(r#"{{"favorites":[{}]}}"#, many.join(",")));
+        assert_eq!(loaded.app.favorites.len(), MAX_FAVORITES);
+        assert_eq!(loaded.app.favorites[0], "s0.hideservers.net");
+        assert_eq!(loaded.app.favorites[255], "s255.hideservers.net");
+    }
+
+    #[test]
+    fn favoriten_bleiben_in_ihrer_reihenfolge_gespeichert() {
+        let path = alte_datei(&mit_filtern());
+        let loaded = load(Some(&path));
+        let app = AppSettings {
+            donation_hint: false,
+            language: Language::De,
+            favorites: vec![
+                "streaming-jp.hideservers.net".to_owned(),
+                "frankfurt1.hideservers.net".to_owned(),
+                "fi.hideservers.net".to_owned(),
+            ],
+            ..AppSettings::default()
+        };
+        save(&path, &loaded.settings, &loaded.kept, &app).unwrap();
+        let again = load(Some(&path));
+        assert_eq!(again.app, app);
+        assert_eq!(again.settings, loaded.settings);
+        assert_eq!(again.kept, loaded.kept);
+        assert_eq!(again.notice, None);
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("\"version\": 1"), "{content}");
+        let mode = fs::metadata(&path).unwrap().permissions();
+        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777, 0o600);
+    }
+
+    #[test]
+    fn favoriten_gehen_nie_an_den_dienst() {
+        let path = alte_datei(&ohne_filter());
+        let app = AppSettings {
+            favorites: vec!["frankfurt1.hideservers.net".to_owned()],
+            ..AppSettings::default()
+        };
+        save(&path, &ohne_filter(), &Filter::default(), &app).unwrap();
+        let loaded = load(Some(&path));
+        let body = to_service_json(&loaded.settings, "de.hideservers.net");
+        assert!(!body.contains("frankfurt1"), "{body}");
+        assert!(!body.contains("favorites"), "{body}");
+    }
+
+    // --- Stored appearance (feature 017) ---
+
+    #[test]
+    fn ohne_aussehen_gilt_hell() {
+        assert_eq!(app_aus("{}").app.appearance, Appearance::Light);
+        assert_eq!(app_aus(r#"{"donation_hint":false}"#).app.appearance, Appearance::Light);
+        let path = temp_file("einstellungen.json");
+        fs::write(&path, br#"{"version":1,"settings":{}}"#).unwrap();
+        assert_eq!(load(Some(&path)).app.appearance, Appearance::Light);
+        assert_eq!(load(Some(&temp_file("fehlt.json"))).app.appearance, Appearance::Light);
+        assert_eq!(AppSettings::default().appearance, Appearance::Light);
+    }
+
+    #[test]
+    fn dunkel_wird_gelesen() {
+        for value in [r#""dark""#, r#"" DARK ""#, r#""Dark""#] {
+            let loaded = app_aus(&format!(r#"{{"appearance":{value}}}"#));
+            assert_eq!(loaded.app.appearance, Appearance::Dark, "{value}");
+            assert!(loaded.app.appearance.is_dark(), "{value}");
+        }
+        assert_eq!(app_aus(r#"{"appearance":"light"}"#).app.appearance, Appearance::Light);
+    }
+
+    /// Anything but the text `dark` is light; the other settings stay as they are.
+    #[test]
+    fn unbekanntes_aussehen_gilt_als_hell_und_der_rest_bleibt() {
+        let rest = r#""donation_hint":false,"language":"de","favorites":["berlin.hideservers.net"],
+            "notifications":false,"keep_running":true,"update_check":true"#;
+        let reference = app_aus(&format!("{{{rest}}}"));
+        assert_eq!(reference.app.language, Language::De);
+        assert!(reference.app.keep_running);
+        for value in [
+            "null",
+            "42",
+            "true",
+            "[]",
+            r#"{"a":1}"#,
+            r#""Dunkel""#,
+            r#""system""#,
+            r#""""#,
+            r#""darkish""#,
+            r#""dar k""#,
+        ] {
+            let loaded = app_aus(&format!(r#"{{{rest},"appearance":{value}}}"#));
+            assert_eq!(loaded.app.appearance, Appearance::Light, "{value}");
+            assert_eq!(
+                AppSettings {
+                    appearance: Appearance::Light,
+                    ..loaded.app.clone()
+                },
+                reference.app,
+                "{value}"
+            );
+            assert_eq!(loaded.settings, reference.settings, "{value}");
+            assert_eq!(loaded.notice, None, "{value}");
+        }
+    }
+
+    #[test]
+    fn aussehen_bleibt_gespeichert_und_der_rest_unberuehrt() {
+        let path = alte_datei(&mit_filtern());
+        let loaded = load(Some(&path));
+        for appearance in [Appearance::Dark, Appearance::Light, Appearance::Dark] {
+            let app = AppSettings {
+                appearance,
+                donation_hint: false,
+                language: Language::De,
+                favorites: vec!["berlin.hideservers.net".to_owned()],
+                notifications: false,
+                keep_running: true,
+                update_check: true,
+            };
+            save(&path, &loaded.settings, &loaded.kept, &app).unwrap();
+            let content = fs::read_to_string(&path).unwrap();
+            assert!(
+                content.contains(&format!(r#""appearance": "{}""#, appearance.code())),
+                "{content}"
+            );
+            assert!(content.contains("\"version\": 1"), "{content}");
+            let again = load(Some(&path));
+            assert_eq!(again.app, app);
+            assert_eq!(again.settings, loaded.settings);
+            assert_eq!(again.kept, loaded.kept);
+            assert_eq!(again.notice, None);
+            let mode = fs::metadata(&path).unwrap().permissions();
+            assert_eq!(std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777, 0o600);
+        }
+    }
+
+    /// A file of the version before this feature (no `appearance`) loads unchanged: light, everything else as it was.
+    #[test]
+    fn datei_ohne_aussehen_laedt_unveraendert() {
+        let loaded = app_aus(r#"{"donation_hint":false,"language":"de","favorites":["berlin.hideservers.net"]}"#);
+        assert_eq!(
+            loaded.app,
+            AppSettings {
+                donation_hint: false,
+                language: Language::De,
+                favorites: vec!["berlin.hideservers.net".to_owned()],
+                ..AppSettings::default()
+            }
+        );
+        assert_eq!(loaded.app.appearance, Appearance::Light);
+    }
+
+    #[test]
+    fn datei_mit_version_2_oder_kaputt_gibt_hell() {
+        let path = temp_file("einstellungen.json");
+        fs::write(&path, br#"{"version":2,"settings":{},"app":{"appearance":"dark"}}"#).unwrap();
+        let loaded = load(Some(&path));
+        assert_eq!(loaded.app.appearance, Appearance::Light);
+        let path = temp_file("einstellungen.json");
+        fs::write(&path, br#"{"version":1,"settings":{},"app":{"appearance":"dark""#).unwrap();
+        assert_eq!(load(Some(&path)).app.appearance, Appearance::Light);
+    }
+
+    #[test]
+    fn aussehen_geht_nie_an_den_dienst() {
+        let path = alte_datei(&ohne_filter());
+        let app = AppSettings {
+            appearance: Appearance::Dark,
+            ..AppSettings::default()
+        };
+        save(&path, &ohne_filter(), &Filter::default(), &app).unwrap();
+        let loaded = load(Some(&path));
+        assert_eq!(loaded.app.appearance, Appearance::Dark);
+        let body = to_service_json(&loaded.settings, "de.hideservers.net");
+        assert!(!body.contains("appearance") && !body.contains("dark"), "{body}");
+        let body = to_service_json_without_host(&loaded.settings);
+        assert!(!body.contains("appearance") && !body.contains("dark"), "{body}");
+        // `changed_fields` compares only the service settings: the appearance is not part of them.
+        assert!(changed_fields(&loaded.settings, &ohne_filter()).is_empty());
     }
 }

@@ -1,0 +1,4 @@
+Example SHA256SUMS files for the tests of the setup script. The test creates the files they name with
+these contents (a line break at the end of each):
+  celata_0.9.0-1_amd64.deb   "celata package body"
+  celata-setup.sh            "celata setup script body"

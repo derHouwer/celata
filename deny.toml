@@ -5,15 +5,18 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 [advisories]
 # Every security advisory fails the check. Exceptions exist only for notices about unmaintained crates:
-# approved by the owner on 2026-11-06, checked again on 2026-11-14 (all six notices still apply, none
-# reports a vulnerability, all crates come in through Slint 1.18.1, the newest version). Check again with
-# every Slint update. Keep the same list in .cargo/audit.toml.
+# approved by the owner on 2026-11-06, checked again on 2026-11-14 and on 2026-11-25 (all six notices still
+# apply, none reports a vulnerability; all crates come in through Slint 1.18.1, the newest version, and three of
+# them also through zbus 5, see below). Check again with every Slint update. Keep the same list in
+# .cargo/audit.toml. RUSTSEC-2026-0543 (chrono) approved by the owner on 2026-11-18: no vulnerability reported,
+# still used by Slint 1.19.0.
 ignore = [
     { id = "RUSTSEC-2026-0441", reason = "pin-utils: comes in through spin_on from slint-build and slint-macros, only at build time" },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser: comes in through sctk-adwaita from winit, window frames under Wayland" },
-    { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6, comes in through the accessibility support of Slint" },
-    { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6, comes in through the accessibility support of Slint" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6; used by the accessibility support of Slint and through zbus 5, which Celata uses for the session and system bus; only zbus 6 replaces it" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6; used by the accessibility support of Slint and through zbus 5, which Celata uses for the session and system bus; only zbus 6 replaces it" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: belongs to zvariant, see there" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono: unmaintained, comes in through i-slint-core; only Slint can replace it" },
 ]
 
 [licenses]

@@ -261,6 +261,10 @@ keys! {
     StateConnectingText,
     StateConnectingBlockedTitle,
     StateConnectingBlockedText,
+    /// {0}: server that is connected to (feature 013).
+    StateConnectingToTitle,
+    /// {0}: server that is connected to, while the internet is blocked (feature 013).
+    StateConnectingBlockedToTitle,
     StateConnectedTitle,
     StateConnectedText,
     StateDisconnectingTitle,
@@ -351,6 +355,21 @@ keys! {
     StreamingPlace,
     /// {0}: country or "Streaming", {1}: place or country.
     LocationChoice,
+    /// Headings in the location list (feature 012).
+    ListHeadingFavorites,
+    ListHeadingAll,
+    /// {0}: location, {1}: host name; target in the status card while connecting or switching.
+    TargetLabel,
+
+    // --- Best location (best.rs, look.rs, feature 013) ---
+    BestName,
+    BestHint,
+    /// {0}: location chosen, for example "Germany, Berlin".
+    BestChosen,
+    NoticeBestAlready,
+    NoticeBestUnknown,
+    NoticeBestLoading,
+    NoticeBestNoList,
 
     // --- Main button (look.rs) ---
     ButtonConnect,
@@ -366,6 +385,84 @@ keys! {
     // --- Public address (look.rs) ---
     ExternalIpAsking,
     ExternalIpFailed,
+
+    // --- System tray icon (trayicon.rs) ---
+    /// Hover text of the icon in the system tray. {0}: short state as at the bottom of the sidebar.
+    TrayTooltip,
+    // --- Tray menu (look.rs, feature 014) ---
+    TrayShow,
+    TrayBest,
+    TrayFavorites,
+    TrayNoFavorites,
+    TrayFavoriteAdd,
+    TrayFavoriteRemove,
+    /// A favourite that is not in the list (any more), without its host name.
+    TrayFavoriteUnavailable,
+    /// A favourite while the server list is loading, without its host name.
+    TrayFavoriteLoading,
+    TrayLocations,
+    ContinentEurope,
+    ContinentAsia,
+    ContinentNorthAmerica,
+    ContinentSouthAmerica,
+    ContinentAfrica,
+    ContinentOceania,
+    TrayLocationsLoading,
+    TrayLocationsMissing,
+    TrayStreaming,
+    /// "{0} (Streaming)": a streaming favourite; {0} is the country.
+    TrayStreamingPlace,
+    TrayAutomatic,
+    /// "{0} (free)": a free location in the menu, as the badge "free" in the list.
+    TrayFreePlace,
+    TrayAbout,
+    TrayQuit,
+    /// {0} is the new version, built by Celata from three numbers.
+    UpdateAvailable,
+    UpdateBlockedNotice,
+    AboutVersion,
+
+    // --- Notifications (notify.rs, feature 014) ---
+    /// {0} is country and place, never a host name.
+    NotifyConnected,
+    NotifyDisconnected,
+    NotifyLost,
+    NotifyLostBlocked,
+    NotifyFailed,
+    NotifySwitched,
+    NotifySwitchedBack,
+    NotifyBlocked,
+    NotifyUnblocked,
+    NotifyActionFailed,
+
+    // --- Settings of Celata, section "Application" (main.rs, feature 014) ---
+    /// {0} is the path of the entry.
+    SettingsAutostartForeign,
+    SettingsAutostartFailed,
+
+    // --- Command line (cli.rs, unblock.rs, feature 014) ---
+    CliHelp,
+    /// {0} is the argument, cleaned and cut.
+    CliUnknown,
+    CliFreed,
+    CliNotBlocked,
+    CliUnreadable,
+    /// {0} is the reason.
+    CliFailed,
+    CliEmergency,
+    StateServiceStartingTitle,
+    StateServiceStartingText,
+    StateServiceStartingBlockedTitle,
+    StateServiceStartingBlockedText,
+    StateServiceUnreachableAutoText,
+    StartNeedsPasswordTitle,
+    StartNeedsPasswordText,
+    StartNotInstalledTitle,
+    StartNotInstalledText,
+    StartFailedTitle,
+    StartFailedText,
+    StartNoPromptNotice,
+    SetupGuideBlockedNotice,
     // END OF KEYS (marker: add new keys before this line)
 }
 

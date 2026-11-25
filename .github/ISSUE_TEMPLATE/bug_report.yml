@@ -16,7 +16,7 @@ body:
     attributes:
       label: Version of Celata
       description: Output of `celata --version`
-      placeholder: celata 0.8.1
+      placeholder: celata 0.9.0
     validations:
       required: true
   - type: input
@@ -57,7 +57,7 @@ body:
     id: client
     attributes:
       label: Version of the hide.me client
-      description: Celata 0.8.1 is tested with version 0.9.14
+      description: Celata 0.9.0 is tested with version 0.9.14
       placeholder: 0.9.14
     validations:
       required: true

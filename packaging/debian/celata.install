@@ -4,3 +4,4 @@
 packaging/desktop/celata.desktop usr/share/applications
 packaging/desktop/io.github.derhouwer.celata.metainfo.xml usr/share/metainfo
 ui/icons/celata.svg usr/share/icons/hicolor/scalable/apps
+packaging/polkit/49-celata.rules usr/share/polkit-1/rules.d

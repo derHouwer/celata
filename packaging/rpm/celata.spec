@@ -4,7 +4,7 @@
 # Builds Celata without network access against the vendored crates (Source1), see docs/packaging.md.
 
 Name:           celata
-Version:        0.8.1
+Version:        0.9.0
 # No distribution tag: one package serves every supported Fedora release. It is built on the oldest of them
 # (Fedora 44). Its automatic dependencies name the libraries by their stable sonames, so dnf refuses to
 # install it on a system where one is missing instead of installing a broken program.
@@ -35,6 +35,9 @@ Requires:       libxkbcommon.so.0()(64bit)
 Requires:       libEGL.so.1()(64bit)
 Requires:       iproute
 Requires:       systemd
+# Lets members of the group celata start the service without a password (packaging/polkit/49-celata.rules).
+Requires:       polkit
+Requires:       tzdata
 Requires:       hicolor-icon-theme
 # Opening the donation page, and the libraries of the X11 session (enabled but untested).
 Recommends:     xdg-utils
@@ -68,6 +71,7 @@ hide.me.
 install -D -p -m 0755 target/rpm/celata %{buildroot}%{_bindir}/celata
 install -D -p -m 0644 packaging/systemd/celata-hide.me.service %{buildroot}%{_unitdir}/celata-hide.me.service
 install -D -p -m 0644 packaging/sysusers/celata.conf %{buildroot}%{_sysusersdir}/celata.conf
+install -D -p -m 0644 packaging/polkit/49-celata.rules %{buildroot}%{_datadir}/polkit-1/rules.d/49-celata.rules
 install -D -p -m 0644 packaging/desktop/celata.desktop %{buildroot}%{_datadir}/applications/celata.desktop
 install -D -p -m 0644 ui/icons/celata.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/celata.svg
 install -D -p -m 0644 packaging/desktop/io.github.derhouwer.celata.metainfo.xml \
@@ -92,10 +96,19 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.derhouwer.c
 %{_bindir}/celata
 %{_unitdir}/celata-hide.me.service
 %{_sysusersdir}/celata.conf
+# The directory belongs to the package polkit.
+%{_datadir}/polkit-1/rules.d/49-celata.rules
 %{_datadir}/applications/celata.desktop
 %{_datadir}/icons/hicolor/scalable/apps/celata.svg
 %{_metainfodir}/io.github.derhouwer.celata.metainfo.xml
 
 %changelog
+* Thu Nov 26 2026 derHouwer <355941224+derHouwer@users.noreply.github.com> - 0.9.0-1
+- The state of the connection in colour, an icon with a menu in the system tray and optional desktop notifications
+- Locations by country, favorite locations and an automatic "Best location"
+- Light and dark appearance
+- Celata starts the hide.me service itself (rule for polkit in the package)
+- Optional check for new versions (off by default)
+- Setup script and Linux Mint 22 as a tested system
 * Mon Nov 16 2026 derHouwer <355941224+derHouwer@users.noreply.github.com> - 0.8.1-1
 - First public version

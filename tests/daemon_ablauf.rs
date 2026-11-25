@@ -1001,3 +1001,59 @@ fn fehlertext_des_dienstes_wird_auch_bei_http_200_bereinigt() {
     assert_eq!(message.chars().count(), 300);
     assert!(!message.chars().any(char::is_control));
 }
+
+// --- `celata --unblock` (feature 014) ---
+
+fn unblock_wait() -> celata::unblock::Wait {
+    celata::unblock::Wait {
+        total: Duration::from_millis(60),
+        step: Duration::from_millis(5),
+    }
+}
+
+#[test]
+fn entsperren_von_der_konsole_bei_sperre() {
+    let daemon = FakeDaemon::start(|call| match call {
+        "GET /state" => Reply::Json(result(&state_json("routed", ""))),
+        "GET /destroy" => Reply::Json(result(&state_json("clean", ""))),
+        _ => Reply::Status(404),
+    });
+    let client = Client::with_timing(&daemon.path, fast_timing());
+    // The routes block until `/destroy` was called.
+    let routes = || Ok(!daemon.calls().iter().any(|call| call == "GET /destroy"));
+    let outcome = celata::unblock::unblock(&client, routes, unblock_wait());
+    assert_eq!(outcome, celata::unblock::UnblockOutcome::Freed);
+    assert_eq!(daemon.calls(), ["GET /state", "GET /destroy"]);
+    assert_eq!(celata::unblock::exit_code(&outcome), 0);
+}
+
+#[test]
+fn entsperren_laesst_eine_verbindung_ohne_sperre_unberuehrt() {
+    let daemon = FakeDaemon::start(|call| match call {
+        "GET /state" => Reply::Json(result(&state_json("connected", "nl.hideservers.net"))),
+        _ => Reply::Status(404),
+    });
+    let client = Client::with_timing(&daemon.path, fast_timing());
+    for routes in [true, false] {
+        let outcome = celata::unblock::unblock(&client, || Ok(routes), unblock_wait());
+        assert_eq!(outcome, celata::unblock::UnblockOutcome::NotBlocked);
+    }
+    assert!(
+        daemon.calls().iter().all(|call| call == "GET /state"),
+        "{:?}",
+        daemon.calls()
+    );
+}
+
+#[test]
+fn entsperren_ohne_dienst_nennt_den_notausgang() {
+    let client = Client::with_timing(unique_path(), fast_timing());
+    let outcome = celata::unblock::unblock(&client, || Ok(true), unblock_wait());
+    assert!(
+        matches!(outcome, celata::unblock::UnblockOutcome::Failed(_)),
+        "{outcome:?}"
+    );
+    assert_eq!(celata::unblock::exit_code(&outcome), 1);
+    let text = celata::unblock::message(&outcome, celata::i18n::Language::En);
+    assert!(text.contains(STOP_COMMAND), "{text}");
+}

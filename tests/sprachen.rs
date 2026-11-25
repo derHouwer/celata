@@ -13,6 +13,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use celata::i18n::{self, Key, Language};
+
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -349,9 +351,16 @@ fn keine_unmarkierten_texte_in_slint() {
             for (before, value) in literals(code) {
                 let marked = before.trim_end().ends_with("@tr(") || before.trim_end().ends_with("=>");
                 let image = before.trim_end().ends_with("@image-url(");
+                // Path data of a drawn symbol (the star of the favourites), no text.
+                let path = before.trim_end().ends_with("commands:");
                 let text_like = value.chars().any(char::is_alphabetic)
                     && (value.contains(' ') || value.chars().any(|c| c.is_uppercase() || !c.is_ascii()));
-                if !marked && !image && text_like && !SLINT_EXCEPTIONS.iter().any(|(allowed, _)| *allowed == value) {
+                if !marked
+                    && !image
+                    && !path
+                    && text_like
+                    && !SLINT_EXCEPTIONS.iter().any(|(allowed, _)| *allowed == value)
+                {
                     found.push(format!("ui/{name}:{}: {value:?}", number + 1));
                 }
             }
@@ -478,4 +487,71 @@ fn laengengrenzen_enger_stellen() {
         "Zu lange Texte an engen Stellen:\n{}",
         found.join("\n")
     );
+}
+
+/// Texts from Rust at narrow places: the menu of the tray icon and the desktop notifications (feature 014), and
+/// titles of states that stand in the sidebar and the state line of the menu (feature 015; the limit is the
+/// longest title that already fitted, the German `StateServiceUnreachableBlockedTitle`).
+/// Placeholders count with a typical value ("0.9.0"), notifications without the value.
+const RUST_LIMITS: [(Key, usize); 40] = [
+    (Key::StateServiceUnreachableBlockedTitle, 42),
+    (Key::StateServiceStartingTitle, 42),
+    (Key::StateServiceStartingBlockedTitle, 42),
+    (Key::StartNeedsPasswordTitle, 42),
+    (Key::StartNotInstalledTitle, 42),
+    (Key::StartFailedTitle, 42),
+    (Key::TrayShow, 30),
+    (Key::TrayBest, 40),
+    (Key::TrayFavorites, 30),
+    (Key::TrayNoFavorites, 30),
+    (Key::TrayFavoriteAdd, 50),
+    (Key::TrayFavoriteRemove, 50),
+    (Key::TrayFavoriteUnavailable, 30),
+    (Key::TrayFavoriteLoading, 30),
+    (Key::TrayLocations, 30),
+    (Key::ContinentEurope, 30),
+    (Key::ContinentAsia, 30),
+    (Key::ContinentNorthAmerica, 30),
+    (Key::ContinentSouthAmerica, 30),
+    (Key::ContinentAfrica, 30),
+    (Key::ContinentOceania, 30),
+    (Key::TrayLocationsLoading, 40),
+    (Key::TrayLocationsMissing, 40),
+    (Key::TrayStreaming, 30),
+    (Key::TrayAutomatic, 30),
+    (Key::TrayAbout, 30),
+    (Key::TrayQuit, 30),
+    (Key::UpdateAvailable, 40),
+    (Key::AboutVersion, 30),
+    (Key::NotifyConnected, 80),
+    (Key::NotifyDisconnected, 80),
+    (Key::NotifyLost, 80),
+    (Key::NotifyLostBlocked, 80),
+    (Key::NotifyFailed, 80),
+    (Key::NotifySwitched, 80),
+    (Key::NotifySwitchedBack, 80),
+    (Key::NotifyBlocked, 80),
+    (Key::NotifyUnblocked, 80),
+    (Key::NotifyActionFailed, 80),
+    (Key::SettingsAutostartFailed, 80),
+];
+
+#[test]
+fn rust_texte_an_engen_stellen_halten_ihre_grenzen() {
+    let mut found = Vec::new();
+    for (key, limit) in RUST_LIMITS {
+        for language in Language::ALL {
+            let template = i18n::text(language, key);
+            let value = if format!("{key:?}").starts_with("Notify") {
+                ""
+            } else {
+                "0.9.0"
+            };
+            let text = i18n::fill(template, &[value.to_owned()]);
+            if text.chars().count() > limit {
+                found.push(format!("{language:?} {key:?}: {text:?} länger als {limit}"));
+            }
+        }
+    }
+    assert!(found.is_empty(), "Zu lange Texte:\n{}", found.join("\n"));
 }

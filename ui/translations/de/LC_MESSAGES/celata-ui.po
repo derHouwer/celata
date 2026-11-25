@@ -17,8 +17,14 @@ msgstr "ab 18"
 msgid "21+"
 msgstr "ab 21"
 
+msgid "About Celata"
+msgstr "Über Celata"
+
 msgid "Add"
 msgstr "Hinzufügen"
+
+msgid "Add to favorites"
+msgstr "Zu Favoriten hinzufügen"
 
 msgid "Advanced"
 msgstr "Erweitert"
@@ -26,20 +32,23 @@ msgstr "Erweitert"
 msgid "All DNS requests via hide.me"
 msgstr "Alle DNS-Anfragen über hide.me"
 
-msgid "All locations"
-msgstr "Alle Standorte"
-
 msgid "Always allow"
 msgstr "Immer erlauben"
 
 msgid "Always block"
 msgstr "Immer sperren"
 
+msgid "Application"
+msgstr "Programm"
+
 msgid "Applies to Celata only. The VPN connection is not affected."
 msgstr "Gilt nur für Celata. Die VPN-Verbindung bleibt unberührt."
 
 msgid "Apply to all filters. * stands for any characters, e.g. *.example.com."
 msgstr "Gelten für alle Filter. * steht für beliebige Zeichen, z. B. *.example.com."
+
+msgid "Asks GitHub once at start and once a day. Without VPN, GitHub sees your public address."
+msgstr "Fragt beim Start und einmal am Tag bei GitHub nach. Ohne VPN sieht GitHub deine öffentliche Adresse."
 
 msgid "Block"
 msgstr "Sperren"
@@ -59,11 +68,23 @@ msgstr "Sperrt das Internet, solange keine VPN-Verbindung besteht. Ist sie aus, 
 msgid "Cancel"
 msgstr "Abbrechen"
 
-msgid "Choose location"
-msgstr "Standort wählen"
+msgid "Celata starts after you log in, without connecting."
+msgstr "Celata startet nach der Anmeldung, ohne zu verbinden."
+
+msgid "Check for new versions"
+msgstr "Nach neuen Versionen suchen"
+
+msgid "Close"
+msgstr "Schließen"
 
 msgid "Close Celata?"
 msgstr "Celata schließen?"
+
+msgid "Closing the window leaves Celata in the system tray. Quit it from the tray menu."
+msgstr "Schließen lässt Celata im Systemabschnitt. Beenden über das Menü am Symbol."
+
+msgid "Collapse"
+msgstr "Zuklappen"
 
 msgid "Command for the terminal"
 msgstr "Befehl für die Konsole"
@@ -91,6 +112,9 @@ msgstr "Befehl kopieren"
 
 msgid "Copy link"
 msgstr "Link kopieren"
+
+msgid "Dark appearance"
+msgstr "Dunkles Aussehen"
 
 msgid "Detect dropout after (s)"
 msgstr "Abbruch erkennen nach (s)"
@@ -125,8 +149,14 @@ msgstr "Sichere Suche erzwingen"
 msgid "Exceptions"
 msgstr "Ausnahmen"
 
+msgid "Expand"
+msgstr "Aufklappen"
+
 msgid "Fallback DNS servers"
 msgstr "Rückfall-DNS-Server"
+
+msgid "Favorite locations"
+msgstr "Lieblingsstandorte"
 
 msgid "Filter ads"
 msgstr "Werbung filtern"
@@ -148,6 +178,9 @@ msgstr "Filter werden beim Verbinden bei hide.me angefordert; eine Bestätigung 
 
 msgid "Firewall mark (0 = none)"
 msgstr "Firewall-Markierung (0 = keine)"
+
+msgid "Fix permanently"
+msgstr "Dauerhaft beheben"
 
 msgid "Fraud, phishing and similar sites."
 msgstr "Betrug, Phishing und ähnliche Seiten."
@@ -191,8 +224,17 @@ msgstr "Nur IPv4"
 msgid "IPv6 only"
 msgstr "Nur IPv6"
 
+msgid "Keep running after closing"
+msgstr "Nach dem Schließen weiterlaufen"
+
 msgid "Kill switch"
 msgstr "Internet-Sperre"
+
+msgid "License: GPL-3.0-only"
+msgstr "Lizenz: GPL-3.0-only"
+
+msgid "Light appearance"
+msgstr "Helles Aussehen"
 
 msgid "Link to the Ko-fi page"
 msgstr "Link zur Ko-fi-Seite"
@@ -202,6 +244,9 @@ msgstr "Kategorien werden geladen …"
 
 msgid "Loading server list …"
 msgstr "Serverliste wird geladen …"
+
+msgid "Loading …"
+msgstr "Wird geladen …"
 
 msgid "Location"
 msgstr "Standort"
@@ -227,11 +272,20 @@ msgstr "Netze am VPN vorbei"
 msgid "No entries."
 msgstr "Keine Einträge."
 
+msgid "No favorites yet. Mark a location with the star under “Locations”."
+msgstr "Noch keine Favoriten. Markiere einen Standort mit dem Stern unter „Standorte“."
+
 msgid "No results"
 msgstr "Keine Treffer"
 
 msgid "No server selected"
 msgstr "Kein Server ausgewählt"
+
+msgid "No system tray icon: closing quits Celata."
+msgstr "Kein Symbol im Systemabschnitt: Schließen beendet Celata."
+
+msgid "not available"
+msgstr "nicht verfügbar"
 
 msgid "Off"
 msgstr "Aus"
@@ -251,6 +305,9 @@ msgstr "Port-Weiterleitung (uPnP, NAT-PMP)"
 msgid "Possible and up"
 msgstr "Ab möglichem"
 
+msgid "Project page"
+msgstr "Projektseite"
+
 msgid "Public"
 msgstr "Öffentlich"
 
@@ -260,11 +317,20 @@ msgstr "Empfangen"
 msgid "Reconnect after (s)"
 msgstr "Neu verbinden nach (s)"
 
+msgid "Releases"
+msgstr "Releases"
+
 msgid "Remove"
 msgstr "Entfernen"
 
+msgid "Remove from favorites"
+msgstr "Aus Favoriten entfernen"
+
 msgid "Remove: {}"
 msgstr "Entfernen: {}"
+
+msgid "Reports connection changes while the window is not in front."
+msgstr "Meldet Änderungen der Verbindung, solange das Fenster nicht vorn ist."
 
 msgid "Request timeout (s)"
 msgstr "Wartezeit für Anfragen (s)"
@@ -286,6 +352,9 @@ msgstr "Routing-Tabelle"
 
 msgid "Rule priority"
 msgstr "Regel-Priorität"
+
+msgid "Run this command once in a terminal. Afterwards Celata starts the service by itself, without a password. The rule only applies in a session directly at this computer."
+msgstr "Führe diesen Befehl einmal in der Konsole aus. Danach startet Celata den Dienst selbst, ohne Passwort. Die Regel gilt nur in einer Sitzung direkt an diesem Rechner."
 
 msgid "Search category"
 msgstr "Kategorie suchen"
@@ -320,14 +389,29 @@ msgstr "Server: {}"
 msgid "Settings"
 msgstr "Einstellungen"
 
+msgid "Setup guide"
+msgstr "Anleitung zur Einrichtung"
+
+msgid "Show notifications"
+msgstr "Benachrichtigungen anzeigen"
+
 msgid "Split tunneling"
 msgstr "Split-Tunnel"
 
 msgid "Standard"
 msgstr "Standard"
 
+msgid "Start at login"
+msgstr "Bei der Anmeldung starten"
+
+msgid "Start service"
+msgstr "Dienst starten"
+
 msgid "Streaming"
 msgstr "Streaming"
+
+msgid "Streaming server"
+msgstr "Streaming-Server"
 
 msgid "Switching …"
 msgstr "Wird gewechselt …"

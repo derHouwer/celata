@@ -1,0 +1,20 @@
+Example os-release files for the tests of the setup script.
+
+Read from the real container images of the system (2026-11-23):
+  fedora-44, fedora-45, fedora-43, debian-13, debian-12, ubuntu-24.04, ubuntu-26.04, ubuntu-26.10,
+  ubuntu-22.04, arch, alpine, almalinux-9, rhel-9 (UBI 9 image), opensuse-leap-15 (Leap 15.6),
+  opensuse-tumbleweed, kali (kali-rolling)
+
+Read from a real installation:
+  nobara-44 (Nobara Linux 44, the development computer)
+
+Taken from the package that ships it:
+  linuxmint-22 (the `base-files` package 13ubuntu10mint22.0.0+wilma of packages.linuxmint.com, release wilma;
+  the container image of Mint 22 reports `ID=ubuntu`, a real installation reports this file)
+
+Written after the public description of the system (not measured, the real file may have more lines):
+  popos-24.04, zorin-18, manjaro, endeavouros, linuxmint-21, lmde-6, fedora-silverblue-44, bazzite,
+  unbekannt-ohne-id (a file without ID), injection (commands inside the values)
+
+The fields that the script reads are ID, ID_LIKE, VERSION_ID, VERSION_CODENAME, UBUNTU_CODENAME,
+DEBIAN_CODENAME, PLATFORM_ID, VARIANT_ID and PRETTY_NAME.

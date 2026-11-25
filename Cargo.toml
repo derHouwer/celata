@@ -3,7 +3,7 @@ members = ["crates/celata-ui"]
 
 # The one place that defines the version of Celata. Both packages inherit it.
 [workspace.package]
-version = "0.8.1"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.92"
 license = "GPL-3.0-only"
@@ -30,9 +30,12 @@ single_match_else = "allow"
 assert_is_empty = "allow"
 
 [workspace.dependencies]
-# Only what Celata needs: no system tray. Accessibility stays on. Wayland is the supported session; X11 is
+# Only what Celata needs. `system-tray` shows the connection state as a coloured icon in the system tray
+# (feature 011, the owner's decision of 2026-11-18). Accessibility stays on. Wayland is the supported session; X11 is
 # enabled so that Celata starts there at all, but it is untested. `compat-1-2` is mandatory for Slint as
-# soon as the default features are off.
+# soon as the default features are off. `unstable-winit-030` gives access to the winit window, the only way to tell
+# whether the window has the focus (notifications appear only while it is not in front). It brings no new crates;
+# Slint may rename or drop it in a later version, then the build fails visibly.
 slint = { version = "1.18.1", default-features = false, features = [
     "std",
     "compat-1-2",
@@ -40,6 +43,8 @@ slint = { version = "1.18.1", default-features = false, features = [
     "backend-winit-x11",
     "renderer-femtovg",
     "accessibility",
+    "system-tray",
+    "unstable-winit-030",
 ] }
 
 [package]
@@ -68,3 +73,9 @@ serde_json = "1.0.154"
 slint.workspace = true
 celata-ui = { path = "crates/celata-ui" }
 ureq = "3.5.2"
+# Draws the logo as a pixel image for the system tray icon, which takes no SVG. Already in the tree through
+# Slint in the same version; no default features, the logo needs neither text nor raster images.
+resvg = { version = "=0.48.1", default-features = false }
+# Session bus of the user: tray icon present, desktop notifications, only one running window. Already in the tree
+# through the system tray in the same version; `blocking-api` adds no crates.
+zbus = { version = "=5.19.0", default-features = false, features = ["async-io", "blocking-api"] }

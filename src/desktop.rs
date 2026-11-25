@@ -24,6 +24,31 @@ pub const ICON_SVG: &[u8] = include_bytes!("../ui/icons/celata.svg");
 /// Marker line: only an entry with this line was created by Celata itself and may be changed by it.
 pub const MARKER: &str = "X-Celata-Generated=true";
 
+/// What the kernel appends to the path of a running program whose file was replaced or removed meanwhile, for
+/// example by an update of the package while Celata keeps running.
+const DELETED_SUFFIX: &str = " (deleted)";
+
+/// Path of the running program for the entries in the user's directory and the command for the rule. After an
+/// update of the package the kernel reports the old file as `<path> (deleted)`; the path without the suffix is
+/// used then if the new file is there, otherwise there is no usable path.
+pub fn program_path() -> io::Result<PathBuf> {
+    program_path_from(std::env::current_exe()?, Path::is_file)
+}
+
+fn program_path_from(exe: PathBuf, exists: impl Fn(&Path) -> bool) -> io::Result<PathBuf> {
+    let Some(stripped) = exe.to_str().and_then(|path| path.strip_suffix(DELETED_SUFFIX)) else {
+        return Ok(exe);
+    };
+    let stripped = PathBuf::from(stripped);
+    if exists(&exe) {
+        Ok(exe)
+    } else if exists(&stripped) {
+        Ok(stripped)
+    } else {
+        Err(io::Error::new(io::ErrorKind::NotFound, "the program file was removed"))
+    }
+}
+
 /// Desktop entry relative to the data directory.
 pub fn entry_path(data_home: &Path) -> PathBuf {
     data_home.join("applications").join(format!("{APP_ID}.desktop"))
@@ -38,7 +63,7 @@ pub fn icon_path(data_home: &Path) -> PathBuf {
 
 /// A value of type `string` according to the Desktop Entry Specification: `\` becomes `\\`, line breaks
 /// and tabs become `\n`, `\t`, `\r`.
-fn escape_string(value: &str) -> String {
+pub fn escape_string(value: &str) -> String {
     let mut result = String::with_capacity(value.len());
     for c in value.chars() {
         match c {
@@ -55,7 +80,7 @@ fn escape_string(value: &str) -> String {
 /// `Exec` with the program path as its only, quoted argument. Inside the quotes `"`, `` ` ``, `$` and `\`
 /// are escaped with `\`, `%` becomes `%%` (no field code). After that the rule for `string` values
 /// applies, which doubles every `\` once more (specification, section "The Exec key").
-fn exec_value(exe: &Path) -> String {
+pub fn exec_value(exe: &Path) -> String {
     let path = exe.to_string_lossy();
     let mut quoted = String::with_capacity(path.len() + 2);
     quoted.push('"');
@@ -156,7 +181,7 @@ fn is_packaged_entry(path: &Path) -> bool {
     }
 }
 
-fn has_marker(entry: &str) -> bool {
+pub fn has_marker(entry: &str) -> bool {
     entry.lines().any(|line| line.trim() == MARKER)
 }
 
@@ -279,6 +304,36 @@ mod tests {
         content
             .lines()
             .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+    }
+
+    #[test]
+    fn replaced_program_file_gives_the_path_without_the_suffix() {
+        // The kernel names the file of a running program that a package replaced "<path> (deleted)".
+        let found = program_path_from(PathBuf::from("/usr/bin/celata (deleted)"), |path| {
+            path == Path::new("/usr/bin/celata")
+        });
+        assert_eq!(found.ok(), Some(PathBuf::from("/usr/bin/celata")));
+    }
+
+    #[test]
+    fn removed_program_file_is_an_error() {
+        let found = program_path_from(PathBuf::from("/usr/bin/celata (deleted)"), |_| false);
+        assert_eq!(found.map_err(|error| error.kind()), Err(io::ErrorKind::NotFound));
+    }
+
+    #[test]
+    fn program_path_without_the_suffix_stays_as_it_is() {
+        let found = program_path_from(PathBuf::from("/usr/bin/celata"), |_| false);
+        assert_eq!(found.ok(), Some(PathBuf::from("/usr/bin/celata")));
+    }
+
+    #[test]
+    fn existing_file_that_ends_in_the_suffix_stays_as_it_is() {
+        let path = PathBuf::from("/opt/odd/celata (deleted)");
+        assert_eq!(
+            program_path_from(path.clone(), |candidate| candidate == path).ok(),
+            Some(path)
+        );
     }
 
     #[test]

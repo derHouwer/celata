@@ -54,7 +54,7 @@ export component PrimaryButton {
             clip: true;
             border-radius: 6px;
             border-width: root.outline && root.enabled ? 2px : 0px;
-            border-color: Theme.accent;
+            border-color: Theme.accent-fg;
             background: !root.enabled
                 ? Theme.disabled-bg
                 : root.outline ? Theme.card : touch.pressed ? Theme.power-field : Theme.accent;
@@ -86,7 +86,7 @@ export component PrimaryButton {
                     wrap: word-wrap;
                     font-size: root.icon-field ? 16px : 14px;
                     font-weight: 600;
-                    color: !root.enabled ? Theme.disabled-text : root.outline ? Theme.accent : Theme.on-dark;
+                    color: !root.enabled ? Theme.disabled-text : root.outline ? Theme.accent-fg : Theme.on-dark;
                     accessible-role: none;
                 }
             }
@@ -130,6 +130,8 @@ export component MainButton {
     in property <string> side-text;
     // False: right area greyed out (kill switch off in the settings)
     in property <bool> side-available: true;
+    // Colour of the connection state from `look::state_color`: "normal", "connected" or "blocked".
+    in property <string> state-color: "normal";
     callback clicked;
     callback side-clicked;
 
@@ -151,6 +153,11 @@ export component MainButton {
     // Red state. With the mouse it applies exactly when a click triggers the action of the right area:
     // the button always shows what a click does.
     property <bool> hot: root.click-is-side || (root.side-usable && side-focus.has-focus);
+    // Connected: the outlined button "Disconnect" is green instead of blue.
+    property <bool> green: root.outline && root.enabled && root.state-color == "connected";
+    // Internet blocked: the button stays as it is and gets a red frame, also when greyed out. Not in the red
+    // state, which is red all over anyway.
+    property <bool> red-frame: root.state-color == "blocked" && !root.hot;
 
     min-height: 52px;
     min-width: content.min-width;
@@ -160,7 +167,7 @@ export component MainButton {
         clip: true;
         border-radius: 6px;
         border-width: root.outline && root.enabled && !root.hot ? 2px : 0px;
-        border-color: Theme.accent;
+        border-color: root.green ? Theme.connected-fg : Theme.accent-fg;
         background: root.hot
             ? (touch.pressed ? Theme.alert-pressed : Theme.tone-alert)
             : !root.enabled
@@ -178,7 +185,9 @@ export component MainButton {
                 width: root.field;
                 background: root.hot
                     ? transparent
-                    : !root.enabled ? Theme.disabled-bg : root.outline ? Theme.accent : Theme.power-field;
+                    : !root.enabled
+                        ? Theme.disabled-bg
+                        : root.green ? Theme.connected : root.outline ? Theme.accent : Theme.power-field;
 
                 if !root.hot: Image {
                     source: @image-url("icons/power.svg");
@@ -200,7 +209,9 @@ export component MainButton {
                 font-weight: 600;
                 color: root.hot
                     ? Theme.on-dark
-                    : !root.enabled ? Theme.disabled-text : root.outline ? Theme.accent : Theme.on-dark;
+                    : !root.enabled
+                        ? Theme.disabled-text
+                        : root.green ? Theme.connected-fg : root.outline ? Theme.accent-fg : Theme.on-dark;
                 accessible-role: none;
             }
 
@@ -222,6 +233,18 @@ export component MainButton {
                 }
             }
         }
+    }
+
+    // Red frame while the internet is blocked. Drawn over the content, so that the left field does not
+    // cover it; it lies inside like the frame of the outlined button, the size does not change.
+    if root.red-frame: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        border-radius: 6px;
+        border-width: 2px;
+        border-color: Theme.tone-alert;
     }
 
     // --- Main part: keyboard and screen reader ---
@@ -322,7 +345,7 @@ export component MainButton {
         height: root.height + 6px;
         border-radius: 8px;
         border-width: 2px;
-        border-color: Theme.focus;
+        border-color: root.green ? Theme.connected-focus : Theme.focus;
     }
 }
 
@@ -334,7 +357,7 @@ export component SecondaryButton {
     // Icon to the left of the text (empty = no icon) and a separate name for screen readers.
     // Without these the button looks the same as without them.
     in property <image> icon;
-    in property <color> icon-color: Theme.tone-alert;
+    in property <color> icon-color: Theme.alert-fg;
     in property <string> label: root.text;
     callback clicked;
 
@@ -367,7 +390,7 @@ export component SecondaryButton {
         Rectangle {
             border-radius: 6px;
             border-width: root.enabled ? 1px : 0px;
-            border-color: root.danger ? Theme.tone-alert : touch.has-hover ? Theme.button-hover-text : Theme.accent;
+            border-color: root.danger ? Theme.alert-fg : touch.has-hover ? Theme.button-hover-text : Theme.accent-fg;
             background: !root.enabled ? Theme.disabled-bg : touch.has-hover ? Theme.button-hover : Theme.card;
 
             if root.icon-space > 0: Image {
@@ -389,8 +412,8 @@ export component SecondaryButton {
                 font-size: 14px;
                 font-weight: 600;
                 color: !root.enabled ? Theme.disabled-text
-                    : root.danger ? Theme.tone-alert
-                    : touch.has-hover ? Theme.button-hover-text : Theme.accent;
+                    : root.danger ? Theme.alert-fg
+                    : touch.has-hover ? Theme.button-hover-text : Theme.accent-fg;
                 accessible-role: none;
             }
         }
@@ -450,6 +473,41 @@ export component Flag inherits Rectangle {
         image-fit: fill;
         accessible-role: none;
     }
+
+    // Dark appearance: a thin border drawn over the picture, so that dark parts of a flag (for example the black
+    // stripe of Germany) stay visible on a dark row. Not drawn in the light appearance.
+    if Theme.is-dark && root.source.width > 0: Rectangle {
+        width: root.width;
+        height: root.height;
+        border-width: 1px;
+        border-color: Theme.image-edge;
+    }
+}
+
+// Blue Celata logo for "Best location" instead of a flag; always blue, also while connected (state colours
+// apply only to window and tray icon). Same width as `Flag`, so that the texts stay aligned. Decoration only:
+// the row is named by its texts.
+export component BestIcon inherits Rectangle {
+    width: 24px;
+    height: 24px;
+
+    Image {
+        source: @image-url("icons/celata.svg");
+        width: 24px;
+        height: 24px;
+        image-fit: contain;
+        accessible-role: none;
+    }
+
+    // Dark appearance: a thin border with the corners of the logo, because its blue reaches only 2.2 : 1 to
+    // 3.3 : 1 against dark rows. Not drawn in the light appearance; the logo itself never changes.
+    if Theme.is-dark: Rectangle {
+        width: root.width;
+        height: root.height;
+        border-radius: 5.25px;
+        border-width: 1px;
+        border-color: Theme.image-edge;
+    }
 }
 
 // Tabs with a blue line below the selected one.
@@ -489,7 +547,7 @@ export component Tabs {
                     text: label;
                     font-size: 14px;
                     font-weight: index == root.current ? 600 : 400;
-                    color: index == root.current ? Theme.accent : Theme.tab-idle;
+                    color: index == root.current ? Theme.accent-fg : Theme.tab-idle;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                     accessible-role: none;
@@ -506,7 +564,7 @@ export component Tabs {
             if index == root.current: Rectangle {
                 y: parent.height - 3px;
                 height: 3px;
-                background: Theme.accent;
+                background: Theme.accent-fg;
             }
 
             if tab-focus.has-focus: Rectangle {
@@ -588,6 +646,58 @@ export component NavItem inherits Rectangle {
         y: 2px;
         width: root.width - 4px;
         height: root.height - 4px;
+        border-width: 2px;
+        border-color: Theme.on-dark;
+    }
+}
+
+// Button at the right end of the header that switches between the light and the dark appearance. The icon shows
+// what a click leads to: a moon in the light appearance, a sun in the dark one. It has no tooltip text
+// (`std-widgets.slint` has no building block for it); screen readers get the name from `accessible-label`.
+export component AppearanceButton inherits Rectangle {
+    callback clicked;
+
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: touch.pressed ? Theme.sidebar-hover : touch.has-hover ? Theme.topbar-hover : transparent;
+    accessible-role: button;
+    accessible-label: Theme.is-dark ? @tr("Light appearance") : @tr("Dark appearance");
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+
+        Image {
+            source: Theme.is-dark ? @image-url("icons/sun.svg") : @image-url("icons/moon.svg");
+            width: 20px;
+            height: 20px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            colorize: Theme.on-dark;
+            accessible-role: none;
+        }
+
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    if focus.has-focus: Rectangle {
+        width: root.width;
+        height: root.height;
+        border-radius: 6px;
         border-width: 2px;
         border-color: Theme.on-dark;
     }
@@ -676,7 +786,7 @@ export component DonationCard inherits Rectangle {
                                 source: @image-url("icons/heart.svg");
                                 width: 16px;
                                 height: 16px;
-                                colorize: Theme.tone-alert;
+                                colorize: Theme.alert-fg;
                                 accessible-role: none;
                             }
                         }
@@ -685,7 +795,7 @@ export component DonationCard inherits Rectangle {
                             text: root.button;
                             font-size: 12px;
                             font-weight: 600;
-                            color: Theme.topbar;
+                            color: Theme.brand-fg;
                             vertical-alignment: center;
                             // Wrap instead of cutting.
                             wrap: word-wrap;
@@ -816,7 +926,8 @@ export component Toggle {
                         width: 16px;
                         height: 16px;
                         border-radius: 8px;
-                        background: Theme.card;
+                        // White in both appearances (the same value as `card` in the light appearance).
+                        background: Theme.on-dark;
                         border-width: root.checked ? 0px : 1px;
                         border-color: Theme.disabled-text;
                         animate x { duration: 120ms; }
@@ -925,7 +1036,7 @@ export component Expander {
                 text: root.open ? "⌄" : "›";
                 width: 16px;
                 font-size: 18px;
-                color: Theme.accent;
+                color: Theme.accent-fg;
                 vertical-alignment: center;
                 horizontal-alignment: center;
                 accessible-role: none;
@@ -935,7 +1046,7 @@ export component Expander {
                 text: root.title;
                 font-size: 15px;
                 font-weight: 600;
-                color: Theme.accent;
+                color: Theme.accent-fg;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
                 accessible-role: none;
@@ -976,7 +1087,7 @@ export component Explanation inherits Text {
 // Error directly below a field.
 export component FieldError inherits Text {
     font-size: 12px;
-    color: Theme.tone-alert;
+    color: Theme.alert-fg;
     wrap: word-wrap;
 }
 
@@ -1151,7 +1262,7 @@ export component ChoiceRow inherits VerticalLayout {
             border-radius: 6px;
             // Hover only through the border: blue on `row-hover` does not reach 4.5 : 1 (tests/kontrast.rs).
             border-width: option-touch.has-hover ? 2px : 1px;
-            border-color: Theme.accent;
+            border-color: index == root.current ? Theme.accent : Theme.accent-fg;
             background: index == root.current ? Theme.accent : Theme.card;
             accessible-role: button;
             accessible-label: option;
@@ -1174,7 +1285,7 @@ export component ChoiceRow inherits VerticalLayout {
                     text: option;
                     font-size: 13px;
                     font-weight: index == root.current ? 600 : 400;
-                    color: index == root.current ? Theme.on-dark : Theme.accent;
+                    color: index == root.current ? Theme.on-dark : Theme.accent-fg;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                     accessible-role: none;
@@ -1221,7 +1332,7 @@ export component ConfirmDialog inherits Rectangle {
         width: min(parent.width - 32px, 460px);
         height: confirm-layout.preferred-height;
         border-width: root.danger ? 2px : 1px;
-        border-color: root.danger ? Theme.tone-alert : Theme.card-border;
+        border-color: root.danger ? Theme.alert-fg : Theme.card-border;
         drop-shadow-blur: 12px;
         drop-shadow-color: Theme.shadow-dialog;
 
@@ -1233,7 +1344,7 @@ export component ConfirmDialog inherits Rectangle {
                 text: root.title;
                 font-size: 18px;
                 font-weight: 600;
-                color: root.danger ? Theme.tone-alert : Theme.text;
+                color: root.danger ? Theme.alert-fg : Theme.text;
                 wrap: word-wrap;
             }
 
@@ -1279,7 +1390,7 @@ export component Toast inherits Rectangle {
     background: root.alert ? Theme.card-warning : Theme.row-hover;
     border-radius: 8px;
     border-width: 1px;
-    border-color: root.alert ? Theme.tone-alert : Theme.accent;
+    border-color: root.alert ? Theme.alert-fg : Theme.accent-fg;
     height: content.preferred-height;
     drop-shadow-blur: 18px;
     drop-shadow-offset-y: 4px;
@@ -1335,5 +1446,114 @@ export component Toast inherits Rectangle {
                 label: @tr("Link to the Ko-fi page");
             }
         }
+    }
+}
+
+// --- Feature 012: star of the favourites and arrow of a country with several locations ---
+
+// Star that switches a favourite. Filled yellow with a dark amber outline for a favourite, otherwise empty
+// and light with a grey outline: the difference is not only the colour. A click on the star is caught by its
+// own touch area and never reaches the row below it (it neither selects nor connects).
+// Path data: lucide-static 1.70.0, icons/star.svg (ISC, see icons/LICENSE-lucide).
+export component Star {
+    in property <bool> on;
+    // Size of the symbol; the hit area is 10px larger.
+    in property <length> size: 18px;
+    callback toggled();
+
+    width: root.size + 10px;
+    height: root.size + 10px;
+    accessible-role: button;
+    accessible-label: root.on ? @tr("Remove from favorites") : @tr("Add to favorites");
+    accessible-action-default => {
+        root.toggled();
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.toggled();
+                return accept;
+            }
+            return reject;
+        }
+
+        Path {
+            x: 5px;
+            y: 5px;
+            width: root.size;
+            height: root.size;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z";
+            fill: root.on ? Theme.star-fill : Theme.card;
+            stroke: root.on ? Theme.star-line : Theme.star-idle;
+            stroke-width: 1.5px;
+            accessible-role: none;
+        }
+
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.toggled();
+            }
+        }
+    }
+
+    if focus.has-focus: Rectangle {
+        border-radius: 4px;
+        border-width: 2px;
+        border-color: Theme.focus;
+    }
+}
+
+// Arrow that folds and unfolds a country in the location list: down while folded, up while unfolded. Like the
+// star it catches its click itself. Symbols: lucide-static 1.70.0, icons/chevron-down.svg and
+// icons/chevron-up.svg (ISC, see icons/LICENSE-lucide).
+export component ExpandArrow {
+    in property <bool> open;
+    callback toggled();
+
+    width: 28px;
+    height: 28px;
+    accessible-role: button;
+    accessible-label: root.open ? @tr("Collapse") : @tr("Expand");
+    accessible-expandable: true;
+    accessible-expanded: root.open;
+    accessible-action-default => {
+        root.toggled();
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.toggled();
+                return accept;
+            }
+            return reject;
+        }
+
+        Image {
+            x: 6px;
+            y: 6px;
+            width: 16px;
+            height: 16px;
+            source: root.open ? @image-url("icons/chevron-up.svg") : @image-url("icons/chevron-down.svg");
+            colorize: Theme.text-soft;
+            accessible-role: none;
+        }
+
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.toggled();
+            }
+        }
+    }
+
+    if focus.has-focus: Rectangle {
+        border-radius: 4px;
+        border-width: 2px;
+        border-color: Theme.focus;
     }
 }

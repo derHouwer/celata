@@ -34,7 +34,8 @@ What it does:
 4. It builds each package in its container **without any network access**, runs the tests of Celata and
    checks the result with the linter of the distribution (`lintian`, `rpmlint`, `namcap`). An error stops
    the build.
-5. It writes everything to `dist/` together with `SHA256SUMS`.
+5. It copies the setup script `celata-setup.sh` from the source archive (a syntax error or a version that
+   differs from the packages stops the build) and writes everything to `dist/` together with `SHA256SUMS`.
 
 | File in `dist/` | For | Built in |
 |---|---|---|
@@ -44,6 +45,7 @@ What it does:
 | `PKGBUILD`, `celata.install` | Arch Linux, to build the package yourself | – |
 | `celata-<version>.tar.gz` | the source code that was built | – |
 | `celata-<version>-vendor.tar.zst` | all third-party crates | – |
+| `celata-setup.sh` | the setup script (`packaging/setup/celata-setup.sh`), see the README | copied from the source archive, with the package release number of this build written into it |
 | `SHA256SUMS` | checksums of all files above | – |
 
 ## Checking a download
@@ -66,6 +68,7 @@ checks, and `apt` installs a local `.deb` without checking a signature anyway.
 | `/usr/bin/celata` | the program |
 | `/usr/lib/systemd/system/celata-hide.me.service` | the service unit; not started and not enabled by the package |
 | `/usr/lib/sysusers.d/celata.conf` | creates the group `celata` |
+| `/usr/share/polkit-1/rules.d/49-celata.rules` | rule for polkit: members of the group `celata` may start the service without a password, in an active session at this computer; nothing else |
 | `/usr/share/applications/celata.desktop` | entry in the application menu |
 | `/usr/share/icons/hicolor/scalable/apps/celata.svg` | icon |
 | `/usr/share/metainfo/io.github.derhouwer.celata.metainfo.xml` | description for software centers |
@@ -73,7 +76,9 @@ checks, and `apt` installs a local `.deb` without checking a signature anyway.
 
 No package contains the hide.me client, credentials, or files in `/etc`, `/opt` or a home directory.
 
-Installing a package never starts or enables the service and adds no user to the group. Updating never
+Installing a package never starts or enables the service and adds no user to the group. With the rule, Celata
+starts the service itself when it needs it; the packages depend on polkit (`polkitd` on Debian and Ubuntu,
+`polkit` on Fedora and Arch Linux). Updating never
 stops or restarts a running service. Removing stops and disables the service; the group stays, as the
 packaging rules of the distributions demand.
 

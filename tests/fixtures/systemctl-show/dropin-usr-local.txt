@@ -1,0 +1,7 @@
+ExecStart={ path=/usr/local/bin/hide.me ; argv[]=/usr/local/bin/hide.me --caddr /run/hide.me/control.sock service ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+WorkingDirectory=/etc/hide.me
+ReadWritePaths=/etc/hide.me /etc -/run/systemd/resolve
+LoadState=loaded
+ActiveState=inactive
+FragmentPath=/usr/lib/systemd/system/celata-hide.me.service
+DropInPaths=/etc/systemd/system/celata-hide.me.service.d/50-celata-setup.conf

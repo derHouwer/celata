@@ -11,6 +11,8 @@ Celata shows a hint in the overview when your system is set up in a way that mak
 
 This page explains the cause, how to check your own system, and what you can do.
 
+The setup script `celata-setup.sh` warns about it while setting up and changes nothing.
+
 ## Why it happens
 
 The hide.me client writes the DNS servers of the tunnel into `/etc/resolv.conf` when it connects and

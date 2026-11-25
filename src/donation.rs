@@ -122,6 +122,7 @@ pub fn is_blocked(display: Option<&DisplayState>) -> bool {
     };
     match display {
         DisplayState::Blocked | DisplayState::ConnectingBlocked | DisplayState::ServiceUnreachableBlocked => true,
+        DisplayState::ServiceStarting { blocked } => *blocked,
         DisplayState::NotConnected
         | DisplayState::Connecting
         | DisplayState::Connected { .. }

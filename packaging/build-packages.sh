@@ -11,6 +11,7 @@
 #   PKGBUILD, celata.install                the Arch recipe itself
 #   celata-<version>.tar.gz                 the source code that was built
 #   celata-<version>-vendor.tar.zst         all third-party crates (cargo vendor)
+#   celata-setup.sh                         the setup script of this version (packaging/setup/celata-setup.sh)
 #   SHA256SUMS
 #
 # Only two steps use the network: preparing the build images (installing compilers and tools) and
@@ -147,7 +148,7 @@ EOF
             podman build -q -t "$(image arch)" -f - . <<'EOF' >/dev/null
 FROM docker.io/library/archlinux:latest
 RUN pacman -Syu --noconfirm --needed base-devel rust namcap fontconfig ttf-dejavu wayland libxkbcommon libglvnd \
-       iproute2 systemd hicolor-icon-theme zstd \
+       iproute2 systemd polkit hicolor-icon-theme zstd \
     && pacman -Scc --noconfirm
 EOF
             ;;
@@ -259,6 +260,17 @@ done
 # --- 5. Results ----------------------------------------------------------------------------------------
 
 cp "$source_archive" "$vendor_archive" "$dist/"
+
+# The setup script comes from the source archive, so that it is the one that was built, with the package release
+# number of this build written into it. A syntax error or a version that does not match stops the build.
+setup_script="$work/celata-setup.sh"
+tar -xzf "$source_archive" -O "$name/packaging/setup/celata-setup.sh" >"$setup_script"
+bash -n "$setup_script" || die "packaging/setup/celata-setup.sh has a syntax error"
+grep -qx "CELATA_VERSION=$version" "$setup_script" || die "CELATA_VERSION in packaging/setup/celata-setup.sh is not $version"
+grep -q '^CELATA_PKGREL=' "$setup_script" || die "packaging/setup/celata-setup.sh has no CELATA_PKGREL line"
+sed "s/^CELATA_PKGREL=.*/CELATA_PKGREL=$pkgrel/" "$setup_script" >"$dist/celata-setup.sh"
+chmod 0755 "$dist/celata-setup.sh"
+echo "==> setup script: celata-setup.sh"
 (cd "$dist" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | LC_ALL=C sort | xargs sha256sum >SHA256SUMS)
 echo "==> done: $dist"
 cat "$dist/SHA256SUMS"

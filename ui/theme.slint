@@ -2,65 +2,112 @@
 // Copyright (C) 2026 derHouwer
 
 // The only place for colours and font sizes of Celata.
-// Other Slint files take colours only from here. `tests/kontrast.rs` reads this file and checks the
-// contrasts; therefore keep the lines in the format `out property <color> name: #rrggbb;`.
+// Other Slint files take colours only from here, never a value, a colour name or a colour function.
+//
+// Celata has two appearances, light and dark. Every colour is one line in the format
+// `out property <color> name: pick(#light, #dark);`, light first (6 hex digits, or 8 with an alpha value for
+// shadows and dimming). `tests/kontrast.rs` reads this file, checks the contrasts for both appearances and keeps
+// the light values as they were. Only the second accent colour `alt-…` has a single value.
+//
+// The appearance comes from one place: `Palette.color-scheme`, set by `MainWindow.set-appearance`. It also drives
+// the built-in controls (drop-down list, text field, scroll bars). `is-dark` is derived from it and never set.
+//
+// Every colour has one role: area (`background`), foreground (text, the border of an element with text, line
+// icons on an area), control (an element without text: switch, focus frame, star, state dot) or decoration
+// (shadow, dimming, separator). A hue that is needed both as an area under white text and as text on a card has
+// two names: `<name>` for the area, `<name>-fg` for text and lines. In the light appearance both have the same
+// value. For a new colour: pick the role, add one `pick(#light, #dark)` line here, list every pair of it with the
+// areas it stands on in `tests/kontrast.rs`, run `cargo test --test kontrast`, and look at the result in both
+// appearances and every language (see "Appearance" in `docs/ARCHITECTURE.md`).
+
+import { Palette } from "std-widgets.slint";
 
 export global Theme {
+    out property <bool> is-dark: Palette.color-scheme == ColorScheme.dark;
+    pure function pick(light: color, dark: color) -> color {
+        return is-dark ? dark : light;
+    }
+
     // Frame
-    out property <color> topbar: #0b3754;
-    out property <color> sidebar: #127bb0;
-    out property <color> sidebar-selected: #0b5f87;
-    out property <color> sidebar-hover: #106f9f;
-    out property <color> on-dark: #ffffff;
-    out property <color> surface: #f1f6f9;
-    out property <color> card: #ffffff;
-    out property <color> card-border: #dde6ec;
+    out property <color> topbar: pick(#0b3754, #082a40);
+    // Area under the button for the appearance in the header while the mouse is over it
+    out property <color> topbar-hover: pick(#124a6e, #0d3a58);
+    out property <color> sidebar: pick(#127bb0, #0d4f73);
+    out property <color> sidebar-selected: pick(#0b5f87, #093a55);
+    out property <color> sidebar-hover: pick(#106f9f, #0f5a82);
+    out property <color> on-dark: pick(#ffffff, #ffffff);
+    out property <color> surface: pick(#f1f6f9, #121c24);
+    out property <color> card: pick(#ffffff, #1b2731);
+    out property <color> card-border: pick(#dde6ec, #2f3f4c);
     // Light shadow of the cards (transparent black, no text)
-    out property <color> shadow: #0000001a;
+    out property <color> shadow: pick(#0000001a, #00000059);
     // Stronger shadow for floating messages (no text)
-    out property <color> shadow-strong: #00000033;
+    out property <color> shadow-strong: pick(#00000033, #00000080);
     // Dimming of the window behind a dialog and shadow of the dialog (no text)
-    out property <color> scrim: #00000080;
-    out property <color> shadow-dialog: #00000060;
+    out property <color> scrim: pick(#00000080, #000000a0);
+    out property <color> shadow-dialog: pick(#00000060, #00000099);
 
     // Buttons and tabs
-    out property <color> accent: #127bb0;
-    out property <color> power-field: #0f6a9a;
-    out property <color> tab-idle: #5f6b75;
-    out property <color> disabled-bg: #e3e8ec;
-    out property <color> disabled-text: #56616a;
-    out property <color> focus: #0b3754;
+    // Area under `on-dark` (button, switch) and control against a card; for text and lines use `accent-fg`
+    out property <color> accent: pick(#127bb0, #127bb0);
+    // Blue for text, lines and icons on cards and areas (same value as `accent` in the light appearance)
+    out property <color> accent-fg: pick(#127bb0, #6cc0ec);
+    out property <color> power-field: pick(#0f6a9a, #0f6a9a);
+    out property <color> tab-idle: pick(#5f6b75, #9aa8b3);
+    out property <color> disabled-bg: pick(#e3e8ec, #2a3640);
+    out property <color> disabled-text: pick(#56616a, #9aa5ae);
+    out property <color> focus: pick(#0b3754, #8fd0f5);
     // White button or card while the mouse is over it: the tint of `row-hover` with a darker blue for text and
     // border, because `accent` on this tint reaches only 4.18 : 1.
-    out property <color> button-hover: #e8f4fb;
-    out property <color> button-hover-text: #0f6a9a;
+    out property <color> button-hover: pick(#e8f4fb, #22394a);
+    out property <color> button-hover-text: pick(#0f6a9a, #7cc4ec);
 
     // Text
-    out property <color> text: #1a1a1a;
-    out property <color> text-soft: #555555;
-    out property <color> free-text: #1a6e35;
-    out property <color> version-text: #8a5a00;
+    out property <color> text: pick(#1a1a1a, #e6edf2);
+    out property <color> text-soft: pick(#555555, #a9b6c0);
+    out property <color> free-text: pick(#1a6e35, #5fd38a);
+    out property <color> version-text: pick(#8a5a00, #e0a84a);
+    // Dark blue of the title of the donation hint (same value as `topbar` in the light appearance)
+    out property <color> brand-fg: pick(#0b3754, #8fd0f5);
 
     // List
-    out property <color> row-hover: #e8f4fb;
-    out property <color> row-selected: #d3eaf7;
+    out property <color> row-hover: pick(#e8f4fb, #22323e);
+    out property <color> row-selected: pick(#d3eaf7, #1d4560);
+    // Star of a favourite: yellow fill (an area, carries no contrast on its own) with a dark amber outline
+    out property <color> star-fill: pick(#f5b301, #f5b301);
+    out property <color> star-line: pick(#a87400, #f5b301);
+    // Outline of the empty star of a location that is not a favourite (like `tab-idle`)
+    out property <color> star-idle: pick(#5f6b75, #8b99a5);
+    // Border around flags and the logo of "Best location" in the dark appearance (not drawn in the light one)
+    out property <color> image-edge: pick(#dde6ec, #8596a3);
 
     // State
-    out property <color> tone-ok: #2e9d4f;
-    out property <color> tone-busy: #e8a317;
-    out property <color> tone-alert: #c4302b;
+    out property <color> tone-ok: pick(#2e9d4f, #2e9d4f);
+    out property <color> tone-busy: pick(#e8a317, #e8a317);
+    // Red area under `on-dark` (main button) and control against a card; for text and lines use `alert-fg`
+    out property <color> tone-alert: pick(#c4302b, #d33b34);
+    // Red for text, lines and icons on cards and areas (same value as `tone-alert` in the light appearance)
+    out property <color> alert-fg: pick(#c4302b, #ff7b72);
     // Red main button while the mouse button is pressed
-    out property <color> alert-pressed: #a32722;
-    out property <color> tone-idle: #7a7a7a;
-    out property <color> card-warning: #fde7e6;
+    out property <color> alert-pressed: pick(#a32722, #a32722);
+    out property <color> tone-idle: pick(#7a7a7a, #7a7a7a);
+    // Green in the family of the sidebar blue (similar saturation and lightness): main button "Disconnect"
+    // and the green logo while connected; for text and lines on cards use `connected-fg`
+    out property <color> connected: pick(#18814d, #18814d);
+    // Green for text and lines on cards and areas (same value as `connected` in the light appearance)
+    out property <color> connected-fg: pick(#18814d, #4cc985);
+    // Focus frame of the green main button
+    out property <color> connected-focus: pick(#0b4a2c, #7fe0a8);
+    out property <color> card-warning: pick(#fde7e6, #3d1f22);
 
     // Command for the terminal
-    out property <color> command-bg: #1f1f1f;
-    out property <color> command-fg: #f0f0f0;
+    out property <color> command-bg: pick(#1f1f1f, #0d1419);
+    out property <color> command-fg: pick(#f0f0f0, #f0f0f0);
 
     // Second accent colour, prepared but not in use: a violet for every blue tone above. To switch, exchange
     // the values of each pair (`topbar` with `alt-topbar`, and so on); nothing else refers to these lines.
-    // `tests/kontrast.rs` checks the same colour pairs for this variant.
+    // `tests/kontrast.rs` checks the same colour pairs for this variant (light appearance only; these lines
+    // have a single value).
     out property <color> alt-topbar: #2a1f5c;
     out property <color> alt-sidebar: #5b4bb5;
     out property <color> alt-sidebar-selected: #44378f;

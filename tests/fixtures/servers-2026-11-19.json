@@ -1,0 +1,1855 @@
+[
+ {
+  "displayName": "Albania",
+  "flag": "al",
+  "geo": {
+   "cityName": "Tirana",
+   "continent": "EU",
+   "countryCode": "AL",
+   "lat": 41.3271,
+   "lon": 19.8202
+  },
+  "hostname": "al-v4.hideservers.net",
+  "id": 485,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Argentina",
+  "flag": "ar",
+  "geo": {
+   "cityName": "Buenos Aires",
+   "continent": "SA",
+   "countryCode": "AR",
+   "lat": -34.6131,
+   "lon": -58.3772
+  },
+  "hostname": "ar-v4.hideservers.net",
+  "id": 395,
+  "tags": [
+   "no-hop-in",
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Austria",
+  "flag": "at",
+  "geo": {
+   "cityName": "Vienna",
+   "continent": "EU",
+   "countryCode": "AT",
+   "lat": 48.107,
+   "lon": 16.2847
+  },
+  "hostname": "at-v4.hideservers.net",
+  "id": 141,
+  "tags": [
+   "upgrade",
+   "no-ping",
+   "10g"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Melbourne",
+    "flag": "au",
+    "geo": {
+     "cityName": "Melbourne",
+     "continent": "OC",
+     "countryCode": "AU",
+     "lat": -37.8225,
+     "lon": 144.915
+    },
+    "hostname": "melbourne-v4.hideservers.net",
+    "id": 147,
+    "tags": [
+     "upgrade",
+     "no-ping",
+     "10g"
+    ]
+   },
+   {
+    "displayName": "Perth",
+    "flag": "au",
+    "geo": {
+     "cityName": "Perth",
+     "continent": "OC",
+     "countryCode": "AU",
+     "lat": -31.9559,
+     "lon": 115.795
+    },
+    "hostname": "perth-v4.hideservers.net",
+    "id": 250,
+    "tags": [
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Sydney",
+    "flag": "au",
+    "geo": {
+     "cityName": "Sydney",
+     "continent": "OC",
+     "countryCode": "AU",
+     "lat": -33.9216,
+     "lon": 151.188
+    },
+    "hostname": "sydney-v4.hideservers.net",
+    "id": 156,
+    "tags": [
+     "upgrade",
+     "no-ping",
+     "10g"
+    ]
+   }
+  ],
+  "displayName": "Australia",
+  "flag": "au",
+  "geo": {
+   "continent": "OC",
+   "countryCode": "AU"
+  },
+  "hostname": "au-v4.hideservers.net",
+  "id": 5,
+  "tags": [
+   "upgrade",
+   "non-p2p",
+   "no-ping",
+   "10g"
+  ]
+ },
+ {
+  "displayName": "Bangladesh",
+  "flag": "bd",
+  "geo": {
+   "cityName": "Dhaka",
+   "continent": "AS",
+   "countryCode": "BD",
+   "lat": 23.7808,
+   "lon": 90.3989
+  },
+  "hostname": "bd-v4.hideservers.net",
+  "id": 545,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Belgium",
+  "flag": "be",
+  "geo": {
+   "cityName": "Brussels",
+   "continent": "EU",
+   "countryCode": "BE",
+   "lat": 50.8504,
+   "lon": 4.34878
+  },
+  "hostname": "be-v4.hideservers.net",
+  "id": 230,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Brasil",
+  "flag": "br",
+  "geo": {
+   "cityName": "São Paulo",
+   "continent": "SA",
+   "countryCode": "BR",
+   "lat": -22.9083,
+   "lon": -43.1964
+  },
+  "hostname": "br-v4.hideservers.net",
+  "id": 164,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Bulgaria",
+  "flag": "bg",
+  "geo": {
+   "cityName": "Sofia",
+   "continent": "EU",
+   "countryCode": "BG",
+   "lat": 42.6977,
+   "lon": 23.3219
+  },
+  "hostname": "bg-v4.hideservers.net",
+  "id": 188,
+  "tags": [
+   "upgrade",
+   "no-ping",
+   "10g"
+  ]
+ },
+ {
+  "displayName": "Cambodia",
+  "flag": "kh",
+  "geo": {
+   "cityName": "Phnom Penh",
+   "continent": "AS",
+   "countryCode": "KH",
+   "lat": 11.5625,
+   "lon": 104.916
+  },
+  "hostname": "phnompenh-v4.hideservers.net",
+  "id": 315,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Calgary",
+    "flag": "ca",
+    "geo": {
+     "cityName": "Calgary",
+     "continent": "NA",
+     "countryCode": "CA",
+     "lat": 51.0472,
+     "lon": -114.083
+    },
+    "hostname": "calgary-v4.hideservers.net",
+    "id": 535,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Montreal",
+    "flag": "ca",
+    "geo": {
+     "cityName": "Montreal",
+     "continent": "NA",
+     "countryCode": "CA",
+     "lat": 45.5161,
+     "lon": -73.6568
+    },
+    "hostname": "montreal-v4.hideservers.net",
+    "id": 470,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Toronto",
+    "flag": "ca",
+    "geo": {
+     "cityName": "Toronto",
+     "continent": "NA",
+     "countryCode": "CA",
+     "lat": 43.651,
+     "lon": -79.347
+    },
+    "hostname": "toronto-v4.hideservers.net",
+    "id": 480,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Vancouver",
+    "flag": "ca",
+    "geo": {
+     "cityName": "Vancouver",
+     "continent": "NA",
+     "countryCode": "CA",
+     "lat": 49.2594,
+     "lon": -123.065
+    },
+    "hostname": "vancouver-v4.hideservers.net",
+    "id": 495,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   }
+  ],
+  "displayName": "Canada",
+  "flag": "ca",
+  "geo": {
+   "continent": "NA",
+   "countryCode": "CA"
+  },
+  "hostname": "ca-v4.hideservers.net",
+  "id": 12,
+  "tags": [
+   "upgrade",
+   "no-ping",
+   "10g"
+  ]
+ },
+ {
+  "displayName": "Chile",
+  "flag": "cl",
+  "geo": {
+   "cityName": "Santiago",
+   "continent": "SA",
+   "countryCode": "CL",
+   "lat": -33.3568,
+   "lon": -70.7281
+  },
+  "hostname": "cl-v4.hideservers.net",
+  "id": 560,
+  "tags": [
+   "upgrade",
+   "no-ping",
+   "10g"
+  ]
+ },
+ {
+  "displayName": "Croatia",
+  "flag": "hr",
+  "geo": {
+   "cityName": "Zagreb",
+   "continent": "EU",
+   "countryCode": "HR",
+   "lat": 48.815,
+   "lon": 15.966
+  },
+  "hostname": "hr-v4.hideservers.net",
+  "id": 400,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Colombia",
+  "flag": "co",
+  "geo": {
+   "cityName": "Bogota",
+   "continent": "SA",
+   "countryCode": "CO",
+   "lat": 4.6243,
+   "lon": -74.0636
+  },
+  "hostname": "co-v4.hideservers.net",
+  "id": 415,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Czech Republic",
+  "flag": "cz",
+  "geo": {
+   "cityName": "Prague",
+   "continent": "EU",
+   "countryCode": "CZ",
+   "lat": 50.088,
+   "lon": 14.4208
+  },
+  "hostname": "cz-v4.hideservers.net",
+  "id": 212,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Denmark",
+  "flag": "dk",
+  "geo": {
+   "cityName": "Copenhagen",
+   "continent": "EU",
+   "countryCode": "DK",
+   "lat": 55.6759,
+   "lon": 12.5655
+  },
+  "hostname": "dk-v4.hideservers.net",
+  "id": 220,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Egypt",
+  "flag": "eg",
+  "geo": {
+   "cityName": "Cairo",
+   "continent": "AF",
+   "countryCode": "EG",
+   "lat": 30.0626,
+   "lon": 31.2497
+  },
+  "hostname": "cairo-v4.hideservers.net",
+  "id": 330,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Helsinki #1",
+    "flag": "fi",
+    "geo": {
+     "cityName": "Helsinki",
+     "continent": "EU",
+     "countryCode": "FI",
+     "lat": 60.342,
+     "lon": 25.0293
+    },
+    "hostname": "fi1-v4.hideservers.net",
+    "id": 591,
+    "tags": [
+     "upgrade",
+     "no-ping",
+     "non-p2p"
+    ]
+   },
+   {
+    "displayName": "Helsinki #2",
+    "flag": "fi",
+    "geo": {
+     "cityName": "Helsinki",
+     "continent": "EU",
+     "countryCode": "FI",
+     "lat": 60.342,
+     "lon": 25.0293
+    },
+    "hostname": "fi2-v4.hideservers.net",
+    "id": 592,
+    "tags": [
+     "upgrade",
+     "no-ping",
+     "10g"
+    ]
+   }
+  ],
+  "displayName": "Finland",
+  "flag": "fi",
+  "geo": {
+   "continent": "EU",
+   "countryCode": "FI"
+  },
+  "hostname": "fi2-v4.hideservers.net",
+  "id": 350,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Finland - Free",
+  "flag": "fi",
+  "geo": {
+   "cityName": "Helsinki",
+   "continent": "EU",
+   "countryCode": "FI",
+   "lat": 60.342,
+   "lon": 25.0293
+  },
+  "hostname": "free-fi-v4.hideservers.net",
+  "id": 590,
+  "tags": [
+   "free",
+   "no-geo",
+   "no-best"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Bordeaux",
+    "flag": "fr",
+    "geo": {
+     "cityName": "Bordeaux",
+     "continent": "EU",
+     "countryCode": "FR",
+     "lat": 44.8378,
+     "lon": -0.5792
+    },
+    "hostname": "bordeaux-v4.hideservers.net",
+    "id": 615,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Marseille",
+    "flag": "fr",
+    "geo": {
+     "cityName": "Marseille",
+     "continent": "EU",
+     "countryCode": "FR",
+     "lat": 43.2964,
+     "lon": 5.3697
+    },
+    "hostname": "marseille-v4.hideservers.net",
+    "id": 505,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Paris",
+    "flag": "fr",
+    "geo": {
+     "cityName": "Paris",
+     "continent": "EU",
+     "countryCode": "FR",
+     "lat": 48.8566,
+     "lon": 2.35
+    },
+    "hostname": "paris-v4.hideservers.net",
+    "id": 108,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   }
+  ],
+  "displayName": "France",
+  "flag": "fr",
+  "geo": {
+   "continent": "EU",
+   "countryCode": "FR"
+  },
+  "hostname": "fr-v4.hideservers.net",
+  "id": 500,
+  "tags": [
+   "10g",
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "France - Free",
+  "flag": "fr",
+  "geo": {
+   "cityName": "Paris",
+   "continent": "EU",
+   "countryCode": "FR",
+   "lat": 48.8566,
+   "lon": 2.35
+  },
+  "hostname": "free-fr-v4.hideservers.net",
+  "id": 425,
+  "tags": [
+   "free"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Berlin",
+    "flag": "de",
+    "geo": {
+     "cityName": "Berlin",
+     "continent": "EU",
+     "countryCode": "DE",
+     "lat": 52.52,
+     "lon": 13.405
+    },
+    "hostname": "berlin-v4.hideservers.net",
+    "id": 625,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Frankfurt #1",
+    "flag": "de",
+    "geo": {
+     "cityName": "Frankfurt",
+     "continent": "EU",
+     "countryCode": "DE",
+     "lat": 50.1109,
+     "lon": 8.6821
+    },
+    "hostname": "frankfurt1-v4.hideservers.net",
+    "id": 390,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Frankfurt #2",
+    "flag": "de",
+    "geo": {
+     "cityName": "Frankfurt",
+     "continent": "EU",
+     "countryCode": "DE",
+     "lat": 50.1109,
+     "lon": 8.6821
+    },
+    "hostname": "frankfurt2-v4.hideservers.net",
+    "id": 233,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   }
+  ],
+  "displayName": "Germany",
+  "flag": "de",
+  "geo": {
+   "continent": "EU",
+   "countryCode": "DE"
+  },
+  "hostname": "de-v4.hideservers.net",
+  "id": 70,
+  "tags": [
+   "upgrade",
+   "no-ping",
+   "10g"
+  ]
+ },
+ {
+  "displayName": "Germany - Free",
+  "flag": "de",
+  "geo": {
+   "cityName": "Frankfurt",
+   "continent": "EU",
+   "countryCode": "DE",
+   "lat": 50.1109,
+   "lon": 8.6821
+  },
+  "hostname": "free-de-v4.hideservers.net",
+  "id": 320,
+  "tags": [
+   "free"
+  ]
+ },
+ {
+  "displayName": "Greece",
+  "flag": "gr",
+  "geo": {
+   "cityName": "Athens",
+   "continent": "EU",
+   "countryCode": "GR",
+   "lat": 37.9838,
+   "lon": 23.7275
+  },
+  "hostname": "gr-v4.hideservers.net",
+  "id": 300,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Hong Kong",
+  "flag": "hk",
+  "geo": {
+   "cityName": "Hong Kong",
+   "continent": "AS",
+   "countryCode": "HK",
+   "lat": 22.304,
+   "lon": 114.174
+  },
+  "hostname": "hk-v4.hideservers.net",
+  "id": 13,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Hungary",
+  "flag": "hu",
+  "geo": {
+   "cityName": "Budapest",
+   "continent": "EU",
+   "countryCode": "HU",
+   "lat": 47.498,
+   "lon": 19.0399
+  },
+  "hostname": "hu-v4.hideservers.net",
+  "id": 219,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Iceland",
+  "flag": "is",
+  "geo": {
+   "cityName": "Reykjavik",
+   "continent": "EU",
+   "countryCode": "IS",
+   "lat": 64.1282,
+   "lon": -21.8277
+  },
+  "hostname": "is-v4.hideservers.net",
+  "id": 67,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Indonesia",
+  "flag": "id",
+  "geo": {
+   "cityName": "Jakarta",
+   "continent": "AS",
+   "countryCode": "ID",
+   "lat": -6.21462,
+   "lon": 106.845
+  },
+  "hostname": "id-v4.hideservers.net",
+  "id": 305,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Ireland",
+  "flag": "ie",
+  "geo": {
+   "cityName": "Dublin",
+   "continent": "EU",
+   "countryCode": "IE",
+   "lat": 53.3331,
+   "lon": -6.24889
+  },
+  "hostname": "ireland-v4.hideservers.net",
+  "id": 310,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Milan",
+    "flag": "it",
+    "geo": {
+     "cityName": "Milan",
+     "continent": "EU",
+     "countryCode": "IT",
+     "lat": 45.4642,
+     "lon": 9.1913
+    },
+    "hostname": "milan-v4.hideservers.net",
+    "id": 550,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Palermo",
+    "flag": "it",
+    "geo": {
+     "cityName": "Palermo",
+     "continent": "EU",
+     "countryCode": "IT",
+     "lat": 38.1612,
+     "lon": 13.3154
+    },
+    "hostname": "palermo-v4.hideservers.net",
+    "id": 555,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   }
+  ],
+  "displayName": "Italy",
+  "flag": "it",
+  "geo": {
+   "continent": "EU",
+   "countryCode": "IT"
+  },
+  "hostname": "it-v4.hideservers.net",
+  "id": 103,
+  "tags": [
+   "10g",
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Japan",
+  "flag": "jp",
+  "geo": {
+   "cityName": "Tokyo",
+   "continent": "AS",
+   "countryCode": "JP",
+   "lat": 35.6833,
+   "lon": 139.767
+  },
+  "hostname": "jp-v4.hideservers.net",
+  "id": 153,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Lithuania",
+  "flag": "lt",
+  "geo": {
+   "cityName": "Siauliai",
+   "continent": "EU",
+   "countryCode": "LT",
+   "lat": 55.91,
+   "lon": 23.31
+  },
+  "hostname": "lt-v4.hideservers.net",
+  "id": 32,
+  "tags": [
+   "upgrade",
+   "non-p2p",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Luxembourg",
+  "flag": "lu",
+  "geo": {
+   "cityName": "Steinsel",
+   "continent": "EU",
+   "countryCode": "LU",
+   "lat": 49.611,
+   "lon": 6.1319
+  },
+  "hostname": "lu-v4.hideservers.net",
+  "id": 29,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Malaysia",
+  "flag": "my",
+  "geo": {
+   "cityName": "Kuala Lumpur",
+   "continent": "AS",
+   "countryCode": "MY",
+   "lat": 3.14965,
+   "lon": 101.704
+  },
+  "hostname": "my-v4.hideservers.net",
+  "id": 530,
+  "tags": [
+   "10g",
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Mexico",
+  "flag": "mx",
+  "geo": {
+   "cityName": "Queretaro",
+   "continent": "NA",
+   "countryCode": "MX",
+   "lat": 20.5671,
+   "lon": -100.256
+  },
+  "hostname": "mx-v4.hideservers.net",
+  "id": 152,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Moldova",
+  "flag": "md",
+  "geo": {
+   "cityName": "Chisinau",
+   "continent": "EU",
+   "countryCode": "MD",
+   "lat": 47.0036,
+   "lon": 28.9071
+  },
+  "hostname": "md-v4.hideservers.net",
+  "id": 460,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Morocco",
+  "flag": "ma",
+  "geo": {
+   "cityName": "Casablanca",
+   "continent": "AF",
+   "countryCode": "MA",
+   "lat": 33.5898,
+   "lon": -7.6038
+  },
+  "hostname": "ma-v4.hideservers.net",
+  "id": 49,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Amsterdam #1",
+    "flag": "nl",
+    "geo": {
+     "cityName": "Amsterdam",
+     "continent": "EU",
+     "countryCode": "NL",
+     "lat": 52.3792,
+     "lon": 4.89943
+    },
+    "hostname": "amsterdam1-v4.hideservers.net",
+    "id": 290,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Amsterdam #2",
+    "flag": "nl",
+    "geo": {
+     "cityName": "Amsterdam",
+     "continent": "EU",
+     "countryCode": "NL",
+     "lat": 52.3792,
+     "lon": 4.89943
+    },
+    "hostname": "amsterdam2-v4.hideservers.net",
+    "id": 370,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   }
+  ],
+  "displayName": "Netherlands",
+  "flag": "nl",
+  "geo": {
+   "continent": "EU",
+   "countryCode": "NL"
+  },
+  "hostname": "nl-v4.hideservers.net",
+  "id": 17,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Netherlands - Free",
+  "flag": "nl",
+  "geo": {
+   "cityName": "Amsterdam",
+   "continent": "EU",
+   "countryCode": "NL",
+   "lat": 52.3792,
+   "lon": 4.89943
+  },
+  "hostname": "free-nl-v4.hideservers.net",
+  "id": 51,
+  "tags": [
+   "free"
+  ]
+ },
+ {
+  "displayName": "New Zealand",
+  "flag": "nz",
+  "geo": {
+   "cityName": "Auckland",
+   "continent": "OC",
+   "countryCode": "NZ",
+   "lat": -36.5253,
+   "lon": 174.419
+  },
+  "hostname": "auckland-v4.hideservers.net",
+  "id": 355,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Norway",
+  "flag": "no",
+  "geo": {
+   "cityName": "Oslo",
+   "continent": "EU",
+   "countryCode": "NO",
+   "lat": 59.9139,
+   "lon": 10.7522
+  },
+  "hostname": "no-v4.hideservers.net",
+  "id": 184,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Peru",
+  "flag": "pe",
+  "geo": {
+   "cityName": "Lima",
+   "continent": "SA",
+   "countryCode": "PE",
+   "lat": -12.0891,
+   "lon": -76.9759
+  },
+  "hostname": "pe-v4.hideservers.net",
+  "id": 580,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Philippines",
+  "flag": "ph",
+  "geo": {
+   "cityName": "Manila",
+   "continent": "AS",
+   "countryCode": "PH",
+   "lat": 14.6042,
+   "lon": 120.982
+  },
+  "hostname": "manila-v4.hideservers.net",
+  "id": 325,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Poland",
+  "flag": "pl",
+  "geo": {
+   "cityName": "Warsaw",
+   "continent": "EU",
+   "countryCode": "PL",
+   "lat": 52.2333,
+   "lon": 21.0167
+  },
+  "hostname": "pl-v4.hideservers.net",
+  "id": 110,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Portugal",
+  "flag": "pt",
+  "geo": {
+   "cityName": "Lisbon",
+   "continent": "EU",
+   "countryCode": "PT",
+   "lat": 38.7369,
+   "lon": -9.142685
+  },
+  "hostname": "pt-v4.hideservers.net",
+  "id": 405,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Romania",
+  "flag": "ro",
+  "geo": {
+   "cityName": "Bucharest",
+   "continent": "EU",
+   "countryCode": "RO",
+   "lat": 44.4396,
+   "lon": 26.0963
+  },
+  "hostname": "ro-v4.hideservers.net",
+  "id": 24,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Serbia",
+  "flag": "rs",
+  "geo": {
+   "cityName": "Belgrade",
+   "continent": "EU",
+   "countryCode": "RS",
+   "lat": 44.804,
+   "lon": 20.4651
+  },
+  "hostname": "rs-v4.hideservers.net",
+  "id": 288,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Singapore",
+  "flag": "sg",
+  "geo": {
+   "cityName": "Singapore",
+   "continent": "AS",
+   "countryCode": "SG",
+   "lat": 1.28966,
+   "lon": 103.85
+  },
+  "hostname": "sg-v4.hideservers.net",
+  "id": 234,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "South Africa",
+  "flag": "za",
+  "geo": {
+   "cityName": "Johannesburg",
+   "continent": "AF",
+   "countryCode": "ZA",
+   "lat": -26.2023,
+   "lon": 28.0436
+  },
+  "hostname": "johannesburg-v4.hideservers.net",
+  "id": 385,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "South Korea",
+  "flag": "kr",
+  "geo": {
+   "cityName": "Seoul",
+   "continent": "AS",
+   "countryCode": "KR",
+   "lat": 37.5665,
+   "lon": 126.978
+  },
+  "hostname": "kr-v4.hideservers.net",
+  "id": 198,
+  "tags": [
+   "non-p2p",
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Slovakia",
+  "flag": "sk",
+  "geo": {
+   "cityName": "Bratislava",
+   "continent": "EU",
+   "countryCode": "SK",
+   "lat": 48.1482,
+   "lon": 17.1067
+  },
+  "hostname": "sk-v4.hideservers.net",
+  "id": 228,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Madrid",
+    "flag": "es",
+    "geo": {
+     "cityName": "Madrid",
+     "continent": "EU",
+     "countryCode": "ES",
+     "lat": 40.4168,
+     "lon": -3.70379
+    },
+    "hostname": "madrid-v4.hideservers.net",
+    "id": 700,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping",
+     "no-hop-in",
+     "no-hop-out"
+    ]
+   },
+   {
+    "displayName": "Barcelona",
+    "flag": "es",
+    "geo": {
+     "cityName": "Barcelona",
+     "continent": "EU",
+     "countryCode": "ES",
+     "lat": 41.3851,
+     "lon": 2.1734
+    },
+    "hostname": "barcelona-v4.hideservers.net",
+    "id": 701,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   }
+  ],
+  "displayName": "Spain",
+  "flag": "es",
+  "geo": {
+   "continent": "EU",
+   "countryCode": "ES"
+  },
+  "hostname": "es-v4.hideservers.net",
+  "id": 206,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping",
+   "no-hop-in",
+   "no-hop-out"
+  ]
+ },
+ {
+  "displayName": "Sweden",
+  "flag": "se",
+  "geo": {
+   "cityName": "Stockholm",
+   "continent": "EU",
+   "countryCode": "SE",
+   "lat": 59.3346,
+   "lon": 18.0632
+  },
+  "hostname": "se-v4.hideservers.net",
+  "id": 143,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Zug",
+    "flag": "ch",
+    "geo": {
+     "cityName": "Zug",
+     "continent": "EU",
+     "countryCode": "CH",
+     "lat": 47.1662,
+     "lon": 8.5155
+    },
+    "hostname": "zug-v4.hideservers.net",
+    "id": 183,
+    "tags": [
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Zurich",
+    "flag": "ch",
+    "geo": {
+     "cityName": "Zurich",
+     "continent": "EU",
+     "countryCode": "CH",
+     "lat": 47.4515,
+     "lon": 8.56457
+    },
+    "hostname": "zurich-v4.hideservers.net",
+    "id": 21,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   }
+  ],
+  "displayName": "Switzerland",
+  "flag": "ch",
+  "geo": {
+   "continent": "EU",
+   "countryCode": "CH"
+  },
+  "hostname": "ch-v4.hideservers.net",
+  "id": 20,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Switzerland - Free",
+  "flag": "ch",
+  "geo": {
+   "continent": "EU",
+   "countryCode": "CH"
+  },
+  "hostname": "free-ch-v4.hideservers.net",
+  "id": 610,
+  "tags": [
+   "free"
+  ]
+ },
+ {
+  "displayName": "Thailand",
+  "flag": "th",
+  "geo": {
+   "cityName": "Bangkok",
+   "continent": "AS",
+   "countryCode": "TH",
+   "lat": 13.6637,
+   "lon": 100.651
+  },
+  "hostname": "th-v4.hideservers.net",
+  "id": 520,
+  "tags": [
+   "no-hop-in",
+   "10g",
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Taiwan",
+  "flag": "tw",
+  "geo": {
+   "cityName": "Taipei",
+   "continent": "AS",
+   "countryCode": "TW",
+   "lat": 25.0478,
+   "lon": 121.532
+  },
+  "hostname": "taipei-v4.hideservers.net",
+  "id": 335,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Turkey",
+  "flag": "tr",
+  "geo": {
+   "cityName": "Istanbul",
+   "continent": "EU",
+   "countryCode": "TR",
+   "lat": 41.0151,
+   "lon": 28.9795
+  },
+  "hostname": "tr-v4.hideservers.net",
+  "id": 111,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "Ukraine",
+  "flag": "ua",
+  "geo": {
+   "cityName": "Kyiv",
+   "continent": "EU",
+   "countryCode": "UA",
+   "lat": 50.4318,
+   "lon": 30.5164
+  },
+  "hostname": "ua-v4.hideservers.net",
+  "id": 213,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "United Arab Emirates",
+  "flag": "ae",
+  "geo": {
+   "cityName": "Dubai",
+   "continent": "AS",
+   "countryCode": "AE",
+   "lat": 25.277,
+   "lon": 55.2962
+  },
+  "hostname": "ae-v4.hideservers.net",
+  "id": 214,
+  "tags": [
+   "upgrade",
+   "no-ping"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "London",
+    "flag": "gb",
+    "geo": {
+     "cityName": "London",
+     "continent": "EU",
+     "countryCode": "GB",
+     "lat": 51.5098,
+     "lon": -0.0761
+    },
+    "hostname": "london-v4.hideservers.net",
+    "id": 61,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Manchester",
+    "flag": "gb",
+    "geo": {
+     "cityName": "Manchester",
+     "continent": "EU",
+     "countryCode": "GB",
+     "lat": 53.484,
+     "lon": -2.24464
+    },
+    "hostname": "manchester-v4.hideservers.net",
+    "id": 260,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   }
+  ],
+  "displayName": "United Kingdom",
+  "flag": "gb",
+  "geo": {
+   "cityName": "London",
+   "continent": "EU",
+   "countryCode": "GB",
+   "lat": 51.5098,
+   "lon": -0.0761
+  },
+  "hostname": "uk-v4.hideservers.net",
+  "id": 59,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "United Kingdom - Free",
+  "flag": "gb",
+  "geo": {
+   "continent": "EU",
+   "countryCode": "GB"
+  },
+  "hostname": "free-uk-v4.hideservers.net",
+  "id": 600,
+  "tags": [
+   "free",
+   "no-best"
+  ]
+ },
+ {
+  "children": [
+   {
+    "displayName": "Arizona, Phoenix",
+    "flag": "us",
+    "geo": {
+     "cityName": "Phoenix",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 33.4484,
+     "lon": -112.074
+    },
+    "hostname": "phoenix-v4.hideservers.net",
+    "id": 254,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "California, Los Angeles",
+    "flag": "us",
+    "geo": {
+     "cityName": "Los Angeles",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 34.0522,
+     "lon": -118.244
+    },
+    "hostname": "losangeles-v4.hideservers.net",
+    "id": 245,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "California, San Jose",
+    "flag": "us",
+    "geo": {
+     "cityName": "Los Angeles",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 37.2419,
+     "lon": -121.782
+    },
+    "hostname": "sanjose-v4.hideservers.net",
+    "id": 490,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Colorado, Denver",
+    "flag": "us",
+    "geo": {
+     "cityName": "Denver",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 39.7392,
+     "lon": -104.9847
+    },
+    "hostname": "denver-v4.hideservers.net",
+    "id": 430,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Florida, Miami",
+    "flag": "us",
+    "geo": {
+     "cityName": "Miami",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 25.7617,
+     "lon": -80.1918
+    },
+    "hostname": "miami-v4.hideservers.net",
+    "id": 114,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Georgia, Atlanta",
+    "flag": "us",
+    "geo": {
+     "cityName": "Atlanta",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 33.7489954,
+     "lon": -84.3879824
+    },
+    "hostname": "atlanta-v4.hideservers.net",
+    "id": 380,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Illinois, Chicago",
+    "flag": "us",
+    "geo": {
+     "cityName": "Chicago",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 41.85,
+     "lon": -87.65
+    },
+    "hostname": "illinois-v4.hideservers.net",
+    "id": 410,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Massachusetts, Boston",
+    "flag": "us",
+    "geo": {
+     "cityName": "Boston",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 42.3546,
+     "lon": -71.0596
+    },
+    "hostname": "boston-v4.hideservers.net",
+    "id": 515,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Michigan, Detroit",
+    "flag": "us",
+    "geo": {
+     "cityName": "Detroit",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 42.3314,
+     "lon": -83.0457
+    },
+    "hostname": "detroit-v4.hideservers.net",
+    "id": 440,
+    "tags": [
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Missouri, Kansas City",
+    "flag": "us",
+    "geo": {
+     "cityName": "Kansas City",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 39.0997,
+     "lon": -94.5783
+    },
+    "hostname": "kansascity-v4.hideservers.net",
+    "id": 450,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "New York, New York City",
+    "flag": "us",
+    "geo": {
+     "cityName": "New York",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 40.7306,
+     "lon": -73.9352
+    },
+    "hostname": "newyorkcity-v4.hideservers.net",
+    "id": 243,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Texas, Dallas",
+    "flag": "us",
+    "geo": {
+     "cityName": "Dallas",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 32.7872,
+     "lon": -96.7963
+    },
+    "hostname": "dallas-v4.hideservers.net",
+    "id": 381,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Texas, Houston",
+    "flag": "us",
+    "geo": {
+     "cityName": "Houston",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 29.8441,
+     "lon": -95.5604
+    },
+    "hostname": "houston-v4.hideservers.net",
+    "id": 510,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Utah, Salt Lake City",
+    "flag": "us",
+    "geo": {
+     "cityName": "Salt Lake City",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 40.7685,
+     "lon": -111.886
+    },
+    "hostname": "saltlakecity-v4.hideservers.net",
+    "id": 570,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Washington, D.C.",
+    "flag": "us",
+    "geo": {
+     "cityName": "Washington",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 39.0152,
+     "lon": -77.462
+    },
+    "hostname": "washington-dc-v4.hideservers.net",
+    "id": 540,
+    "tags": [
+     "10g",
+     "upgrade",
+     "no-ping"
+    ]
+   },
+   {
+    "displayName": "Washington, Seattle",
+    "flag": "us",
+    "geo": {
+     "cityName": "Seattle",
+     "continent": "NA",
+     "countryCode": "US",
+     "lat": 47.6062,
+     "lon": -122.3321
+    },
+    "hostname": "seattle-v4.hideservers.net",
+    "id": 420,
+    "tags": [
+     "upgrade",
+     "10g",
+     "no-ping"
+    ]
+   }
+  ],
+  "displayName": "United States",
+  "flag": "us",
+  "geo": {
+   "continent": "NA",
+   "countryCode": "US"
+  },
+  "hostname": "us-v4.hideservers.net",
+  "id": 34,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ },
+ {
+  "displayName": "United States - Free",
+  "flag": "us",
+  "geo": {
+   "continent": "NA",
+   "countryCode": "US"
+  },
+  "hostname": "free-us-v4.hideservers.net",
+  "id": 275,
+  "tags": [
+   "free",
+   "non-p2p"
+  ]
+ },
+ {
+  "displayName": "Vietnam",
+  "flag": "vn",
+  "geo": {
+   "cityName": "Ho Chi Minh City",
+   "continent": "AS",
+   "countryCode": "VN",
+   "lat": 10.773,
+   "lon": 106.703
+  },
+  "hostname": "vn-v4.hideservers.net",
+  "id": 340,
+  "tags": [
+   "upgrade",
+   "10g",
+   "no-ping"
+  ]
+ }
+]

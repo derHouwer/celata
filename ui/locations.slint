@@ -5,24 +5,41 @@
 
 import { LineEdit, ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Card, Flag, PrimaryButton, SecondaryButton, Tabs, Toggle } from "widgets.slint";
+import { BestIcon, Card, ExpandArrow, Flag, PrimaryButton, SecondaryButton, Star, Tabs, Toggle } from "widgets.slint";
 
-// A row of the location list. The contents come from `src/look.rs` (`LocationRow`), the flag from the
+// A row of the location list. The contents come from `src/look.rs` (`LocationItem`), the flag from the
 // image cache in `src/main.rs`; without a flag `flag` stays empty.
-export struct ServerRow {
+export struct LocationItem {
+    // "heading", "location", "country", "child", "missing", "loading" or "best" ("Best location": Celata logo
+    // instead of the flag, host and star-host "best", place the hint or "Chosen: …")
+    kind: string,
     flag: image,
+    // Country name (bold), the text of a heading, or empty
     country: string,
+    // Place, "Automatic, hide.me chooses the location", "Streaming", place of an unfolded location, or the host
+    // name of a favourite that is missing or loading
     place: string,
+    // Host for connecting; empty: the row cannot be selected
     host: string,
+    // Host the star switches; empty: no star
+    star-host: string,
     free: bool,
     // Text for the selected location, for example "Australia, Melbourne"
     choice: string,
+    favorite: bool,
+    expandable: bool,
+    expanded: bool,
+    // Folded, and a location below it is selected or connected
+    holds-selected: bool,
+    holds-connected: bool,
+    // Country code, for the arrow (`toggle-country`)
+    code: string,
 }
 
-// A list of locations: a click selects, a double click connects or switches.
-// Used for both tabs, so that the handling does not differ.
+// A list of locations: a click selects, a double click connects or switches. Star and arrow catch their
+// clicks themselves; the row never gets them. Used for both tabs, so that the handling does not differ.
 component ServerList inherits VerticalLayout {
-    in property <[ServerRow]> rows;
+    in property <[LocationItem]> rows;
     in property <bool> can-connect;
     // While connected: switching to a server other than the connected one is possible
     in property <bool> can-switch;
@@ -31,8 +48,13 @@ component ServerList inherits VerticalLayout {
     in property <bool> show-empty;
     in-out property <string> selected-host;
     in-out property <string> selected-name;
+    // Scroll position of the list. Rust moves it when rows above the visible area are inserted or removed, so
+    // that the visible rows stay where they are (star, arrow).
+    in-out property <length> scroll-y;
     callback connect(string);
     callback selection-changed(string);
+    callback toggle-favorite(string);
+    callback toggle-country(string);
     spacing: 8px;
 
     if root.show-empty && root.rows.length == 0: Text {
@@ -43,88 +65,168 @@ component ServerList inherits VerticalLayout {
     ListView {
         vertical-stretch: 1;
         min-height: 104px;
+        content-y <=> root.scroll-y;
 
-        // All rows have the same height: the list estimates its total height from the visible rows.
-        // With differing heights the scroll bar would not follow the mouse pointer.
-        for row in root.rows: Rectangle {
+        // All rows have the same height, headings and unfolded locations as well: the list estimates its
+        // total height from the visible rows. With differing heights the scroll bar would not follow the
+        // mouse pointer.
+        for row in root.rows: line := Rectangle {
+            // Headings and favourites that cannot be selected have no hover and no selection colour.
+            property <bool> plain: row.kind == "heading" || row.kind == "missing" || row.kind == "loading";
+            property <bool> unavailable: row.kind == "missing" || row.kind == "loading";
+            property <bool> connected: (row.host != "" && row.host == root.connected-host) || row.holds-connected;
             height: 52px;
-            background: row.host == root.selected-host
-                ? Theme.row-selected
-                : touch.has-hover ? Theme.row-hover : Theme.card;
+            background: line.plain
+                ? Theme.card
+                : (row.host != "" && row.host == root.selected-host) || row.holds-selected
+                    ? Theme.row-selected
+                    : touch.has-hover ? Theme.row-hover : Theme.card;
 
+            // The touch area contains the row, so that star and arrow inside it get their clicks first.
             touch := TouchArea {
+                enabled: !line.plain;
                 clicked => {
-                    root.selected-host = row.host;
-                    root.selected-name = row.choice;
-                    root.selection-changed(row.host);
+                    if (row.host != "") {
+                        root.selected-host = row.host;
+                        root.selected-name = row.choice;
+                        root.selection-changed(row.host);
+                    } else if (row.kind == "country") {
+                        // Country without "Automatic": the row folds and unfolds.
+                        root.toggle-country(row.code);
+                    }
                 }
                 double-clicked => {
-                    root.selected-host = row.host;
-                    root.selected-name = row.choice;
-                    root.selection-changed(row.host);
-                    if (root.can-connect || (root.can-switch && row.host != root.connected-host)) {
-                        root.connect(row.host);
-                    }
-                }
-            }
-
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                spacing: 12px;
-
-                VerticalLayout {
-                    alignment: center;
-                    Flag {
-                        source: row.flag;
+                    if (row.host != "") {
+                        root.selected-host = row.host;
+                        root.selected-name = row.choice;
+                        root.selection-changed(row.host);
+                        if (root.can-connect || (root.can-switch && row.host != root.connected-host)) {
+                            root.connect(row.host);
+                        }
                     }
                 }
 
-                VerticalLayout {
-                    alignment: center;
-                    horizontal-stretch: 1;
-
-                    Text {
-                        text: row.country;
-                        font-size: Theme.country;
-                        font-weight: 600;
-                        color: Theme.text;
-                        overflow: elide; // may be cut: row of a list, the full name is shown in the overview
-                    }
-
-                    Text {
-                        text: row.place;
-                        font-size: Theme.place;
-                        color: Theme.text-soft;
-                        overflow: elide; // may be cut: row of a list, the full name is shown in the overview
-                    }
+                // Heading: larger than the country names, with a fine line below it
+                if row.kind == "heading": Text {
+                    x: 12px;
+                    y: parent.height - self.height - 8px;
+                    width: parent.width - 24px;
+                    text: row.country;
+                    font-size: 17px;
+                    font-weight: 600;
+                    color: Theme.text;
+                    overflow: elide; // may be cut: heading of a list
                 }
 
-                if row.free: Text {
-                    text: @tr("free");
-                    font-size: 12px;
-                    color: Theme.free-text;
-                    horizontal-stretch: 0;
-                    vertical-alignment: center;
+                if row.kind == "heading": Rectangle {
+                    x: 12px;
+                    y: parent.height - 2px;
+                    width: parent.width - 24px;
+                    height: 1px;
+                    background: Theme.card-border;
                 }
 
-                if row.host == root.connected-host: VerticalLayout {
-                    alignment: center;
-                    horizontal-stretch: 0;
+                if row.kind != "heading": HorizontalLayout {
+                    // Unfolded locations are indented below the flag of their country.
+                    padding-left: row.kind == "child" ? 48px : 12px;
+                    padding-right: 8px;
+                    spacing: 12px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        // Flag or, for "Best location", the logo in the same place, switched through `visible`.
+                        Rectangle {
+                            width: 24px;
+                            height: 24px;
+                            Flag {
+                                y: 3px;
+                                source: row.flag;
+                                visible: row.kind != "best";
+                            }
+                            BestIcon {
+                                visible: row.kind == "best";
+                            }
+                        }
+                    }
+
+                    // The texts take only their own width, so that the arrow follows right behind the longer
+                    // of the two lines; the free space lies between arrow and star.
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+
+                        // Country name, for unfolded locations the place, for unavailable favourites the host
+                        Text {
+                            text: row.kind == "child" || line.unavailable ? row.place : row.country;
+                            font-size: Theme.country;
+                            font-weight: row.kind == "child" || line.unavailable ? 400 : 600;
+                            color: Theme.text;
+                            overflow: elide; // may be cut: row of a list, the full name is shown in the overview
+                        }
+
+                        if row.kind != "child" && (row.place != "" || line.unavailable): Text {
+                            text: row.kind == "missing"
+                                ? @tr("not available")
+                                : row.kind == "loading" ? @tr("Loading …") : row.place;
+                            font-size: Theme.place;
+                            color: Theme.text-soft;
+                            overflow: elide; // may be cut: row of a list, the full name is shown in the overview
+                        }
+                    }
+
+                    // Arrow close to the country, the star stays at the right edge.
+                    if row.expandable: VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        ExpandArrow {
+                            open: row.expanded;
+                            toggled => {
+                                root.toggle-country(row.code);
+                            }
+                        }
+                    }
 
                     Rectangle {
-                        height: 20px;
-                        min-width: badge.preferred-width + 16px;
-                        border-radius: 10px;
-                        background: Theme.accent;
+                        horizontal-stretch: 1;
+                    }
 
-                        badge := Text {
-                            text: @tr("Connected");
-                            font-size: 11px;
-                            font-weight: 600;
-                            color: Theme.on-dark;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                    if row.free: Text {
+                        text: @tr("free");
+                        font-size: 12px;
+                        color: Theme.free-text;
+                        horizontal-stretch: 0;
+                        vertical-alignment: center;
+                    }
+
+                    if line.connected: VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+
+                        Rectangle {
+                            height: 20px;
+                            min-width: badge.preferred-width + 16px;
+                            border-radius: 10px;
+                            background: Theme.accent;
+
+                            badge := Text {
+                                text: @tr("Connected");
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: Theme.on-dark;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    if row.star-host != "": VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        Star {
+                            on: row.favorite;
+                            toggled => {
+                                root.toggle-favorite(row.star-host);
+                            }
                         }
                     }
                 }
@@ -134,8 +236,8 @@ component ServerList inherits VerticalLayout {
 }
 
 export component LocationsView inherits VerticalLayout {
-    in property <[ServerRow]> servers;
-    in property <[ServerRow]> streaming-servers;
+    in property <[LocationItem]> servers;
+    in property <[LocationItem]> streaming-servers;
     // "loading", "ready" or "error"
     in property <string> list-state;
     in property <string> list-message;
@@ -152,6 +254,9 @@ export component LocationsView inherits VerticalLayout {
     in-out property <int> tab;
     // "Free only" in the tab "Standard"; Rust filters the list
     in-out property <bool> free-only;
+    // Scroll positions of both lists, kept in the window
+    in-out property <length> servers-scroll;
+    in-out property <length> streaming-scroll;
 
     callback search-changed(string);
     callback reload-servers();
@@ -159,11 +264,13 @@ export component LocationsView inherits VerticalLayout {
     callback disconnect();
     callback selection-changed(string);
     callback free-only-changed(bool);
+    callback toggle-favorite(string);
+    callback toggle-country(string);
 
     spacing: 16px;
 
     Text {
-        text: @tr("All locations");
+        text: @tr("Locations");
         font-size: Theme.page-title;
         font-weight: 600;
         color: Theme.text;
@@ -207,7 +314,7 @@ export component LocationsView inherits VerticalLayout {
                     text: root.list-message;
                     wrap: word-wrap;
                     font-size: 12px;
-                    color: root.list-state == "error" ? Theme.tone-alert : Theme.text-soft;
+                    color: root.list-state == "error" ? Theme.alert-fg : Theme.text-soft;
                 }
 
                 if root.list-state == "loading": Text {
@@ -228,6 +335,7 @@ export component LocationsView inherits VerticalLayout {
                 ServerList {
                     vertical-stretch: 1;
                     rows: root.servers;
+                    scroll-y <=> root.servers-scroll;
                     can-connect: root.can-connect;
                     can-switch: root.can-switch;
                     connected-host: root.connected-host;
@@ -239,6 +347,12 @@ export component LocationsView inherits VerticalLayout {
                     }
                     selection-changed(host) => {
                         root.selection-changed(host);
+                    }
+                    toggle-favorite(host) => {
+                        root.toggle-favorite(host);
+                    }
+                    toggle-country(code) => {
+                        root.toggle-country(code);
                     }
                 }
             }
@@ -258,6 +372,7 @@ export component LocationsView inherits VerticalLayout {
                 ServerList {
                     vertical-stretch: 1;
                     rows: root.streaming-servers;
+                    scroll-y <=> root.streaming-scroll;
                     can-connect: root.can-connect;
                     can-switch: root.can-switch;
                     connected-host: root.connected-host;
@@ -269,6 +384,12 @@ export component LocationsView inherits VerticalLayout {
                     }
                     selection-changed(host) => {
                         root.selection-changed(host);
+                    }
+                    toggle-favorite(host) => {
+                        root.toggle-favorite(host);
+                    }
+                    toggle-country(code) => {
+                        root.toggle-country(code);
                     }
                 }
             }

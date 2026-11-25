@@ -10,37 +10,46 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::rc::Rc;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
+use celata::autostart::{self, AutostartState};
+use celata::background::{self, CloseOutcome, StartMode};
+use celata::best::{self, Choice};
 use celata::categories::{self, Category};
 use celata::daemon::{Client, Flow, Observation};
 use celata::desktop;
 use celata::donation;
+use celata::favorites;
 use celata::i18n::{self, Key, Language, Phrase};
-use celata::look::{self, LocationRow, MainButton};
+use celata::instance::{self, Claim};
+use celata::look::{self, ConnectWish, MainButton, MenuAction, MenuDecision, StateColor};
+use celata::notify;
+use celata::presence::{self, TrayPresence};
 use celata::servers::{self, Country, Source};
 use celata::settings::Class;
 use celata::settings::{
-    self, AppSettings, Applied, Edit, Environment, Field, FieldError, Filter, IpVersion, Ledger, PendingChange,
-    Settings,
+    self, AppSettings, Appearance, Applied, Edit, Environment, Field, FieldError, Filter, IpVersion, Ledger,
+    PendingChange, Settings,
 };
 use celata::state::{
-    CloseDecision, CloseDialog, DisconnectStart, DisplayState, Monitor, ROUTE_HINT, ReapplyGate, Start, StatusView,
-    UNBLOCK_WARNING, reapply_notice, run_connect, run_disconnect, run_route, run_unblock,
+    self, CloseDecision, CloseDialog, DisconnectStart, DisplayState, Monitor, ROUTE_HINT, ReapplyGate, Start,
+    StartButton, StatusView, UNBLOCK_WARNING, reapply_notice, run_connect, run_disconnect, run_route, run_unblock,
 };
 use celata::streaming::{self, Check};
 use celata::switch::{self, SwitchResult, Target};
-use celata::{cli, dnsleak, flags, killswitch};
+use celata::{about, cli, dnsleak, flags, killswitch, trayicon, unit, update, zone};
 use celata_ui::{
-    CategoryRow, ConfirmRow, DetailsRow, DonationTexts, HintRow, MainWindow, ServerRow, SettingsErrors, SettingsForm,
+    CategoryRow, CelataTray, ConfirmRow, DetailsRow, DonationTexts, FavoriteItem, HintRow, LocationItem, MainWindow,
+    SettingsErrors, SettingsForm, TrayContinent, TrayCountry, TrayPlace, TraySlot,
 };
-use slint::{CloseRequestResponse, ComponentHandle, Image, ModelRc, SharedString, VecModel};
+use slint::{CloseRequestResponse, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
 /// Settings and everything that belongs to applying them.
 struct SettingsStore {
@@ -73,7 +82,27 @@ enum Awaiting {
     /// held-back selection from `settings::reset_all`.
     Settings(Box<Settings>, Option<Filter>),
     /// Connect from "Internet blocked", with a short gap for rebuilding the routes.
-    Connect(String),
+    Connect(Pick),
+}
+
+/// Host an operation connects or switches to, and whether "Best location" chose it.
+#[derive(Clone)]
+struct Pick {
+    host: String,
+    /// `None`: the user chose the location. Otherwise "Best location" chose `host`, and these are the further
+    /// candidates (at most `best::MAX_TRIES` − 1) for the check of names during a switch.
+    best: Option<Vec<String>>,
+}
+
+impl Pick {
+    /// A location the user chose.
+    fn own(host: String) -> Self {
+        Self { host, best: None }
+    }
+
+    fn via_best(&self) -> bool {
+        self.best.is_some()
+    }
 }
 
 impl SettingsStore {
@@ -96,6 +125,43 @@ struct Shared {
     streaming: Arc<Mutex<Check>>,
     settings: Arc<Mutex<SettingsStore>>,
     client: Client,
+    /// Texts for desktop notifications; `None` if the thread could not start.
+    notifier: Option<Sender<String>>,
+    /// Display last handed to the window, to find the change worth a notification. Set under the lock of the
+    /// monitor, so that the changes are seen in the right order.
+    last_shown: Arc<Mutex<notify::Shown>>,
+    /// State of the location list that lasts only for this session.
+    session: Arc<Mutex<Session>>,
+}
+
+/// State of the location list for this session only; never stored.
+#[derive(Default)]
+struct Session {
+    /// Unfolded countries (codes) in the tab "Standard".
+    expanded: BTreeSet<String>,
+    /// Country names built by Celata with which connecting or switching failed.
+    failed_derived: BTreeSet<String>,
+    /// What "Best location" chose and which of its hosts failed (feature 013); never stored.
+    best: best::Memory,
+}
+
+/// The models of the three location lists. The same models stay for the whole run and only the rows that
+/// changed are replaced, so that the list views keep their scroll position. Only use it in the window
+/// thread.
+#[derive(Default)]
+struct Lists {
+    servers: Rc<VecModel<LocationItem>>,
+    streaming: Rc<VecModel<LocationItem>>,
+    favorites: Rc<VecModel<FavoriteItem>>,
+    shown_servers: Vec<look::LocationItem>,
+    shown_streaming: Vec<look::LocationItem>,
+    shown_favorites: Vec<look::FavoriteItem>,
+    /// Connected host the lists were last built for; they are built anew when it changes.
+    connected: SharedString,
+}
+
+thread_local! {
+    static LISTS: RefCell<Lists> = RefCell::default();
 }
 
 /// Flags as images, converted once per country. Only use it in the window thread (`slint::Image` is
@@ -150,6 +216,9 @@ thread_local! {
     static SHOWN: RefCell<Shown> = RefCell::default();
     /// Result of the last look at the name resolution of this system. Only used in the window thread.
     static DNS: Cell<dnsleak::Assessment> = const { Cell::new(dnsleak::Assessment::Unknown) };
+    /// Target of the running connection attempt as last shown (`StatusView::connect_target`), for the card
+    /// "Location". Only used in the window thread.
+    static CONNECT_TARGET: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// How often Celata looks again whether DNS requests can bypass the VPN.
@@ -185,7 +254,7 @@ fn register_desktop() {
     if let Err(error) = slint::set_xdg_app_id(desktop::APP_ID) {
         report(Phrase::fill(Key::TerminalAppIdFailed, [Phrase::raw(error.to_string())]));
     }
-    let installed = std::env::current_exe().and_then(|exe| {
+    let installed = desktop::program_path().and_then(|exe| {
         let data_home = desktop::data_home().ok_or_else(|| std::io::Error::other("no data directory"))?;
         desktop::install(&exe, &data_home, &desktop::system_data_dirs())
     });
@@ -194,6 +263,392 @@ fn register_desktop() {
             Key::TerminalDesktopEntryFailed,
             [Phrase::raw(error.to_string())],
         ));
+    }
+}
+
+thread_local! {
+    /// Icon in the system tray. Created only once the system tray is there (Slint tries to register an icon
+    /// only once); `None` before that or without a system tray. Only used in the window thread.
+    static TRAY: RefCell<Option<CelataTray>> = const { RefCell::new(None) };
+    /// Last answer of the thread `presence`. Only used in the window thread.
+    static PRESENCE: Cell<TrayPresence> = const { Cell::new(TrayPresence::Unknown) };
+}
+
+/// Creates the icon in the system tray. If the logo cannot be drawn or Slint fails, Celata runs on without the
+/// icon and without a message; main button and sidebar show the state alone.
+fn create_tray(shared: &Shared) -> Option<CelataTray> {
+    let tray = CelataTray::new().ok()?;
+    // The first picture; `show_state_icon` sets the colour and text of the state from then on.
+    tray.set_state_icon(logo(StateColor::Normal)?);
+    let activate = shared.clone();
+    tray.on_activate(move || bring_window_back(&activate));
+    connect_tray_menu(&tray, shared);
+    Some(tray)
+}
+
+/// Connects the entries of the menu. Each one only names what was chosen; `menu_choice` decides in the state
+/// at the time of the choice.
+fn connect_tray_menu(tray: &CelataTray, shared: &Shared) {
+    let menu = shared.clone();
+    tray.on_show_window(move || menu_choice(&menu, &MenuAction::ShowWindow));
+    let menu = shared.clone();
+    tray.on_main_action(move || menu_choice(&menu, &MenuAction::Main));
+    let menu = shared.clone();
+    tray.on_connect_best(move || menu_choice(&menu, &MenuAction::Best));
+    let menu = shared.clone();
+    tray.on_side_action(move || menu_choice(&menu, &MenuAction::Side));
+    let menu = shared.clone();
+    tray.on_choose(move |host| menu_choice(&menu, &MenuAction::Choose(host.to_string())));
+    let menu = shared.clone();
+    tray.on_toggle_favorite(move || menu_choice(&menu, &MenuAction::ToggleFavorite));
+    let menu = shared.clone();
+    tray.on_open_update(move || menu_choice(&menu, &MenuAction::OpenUpdate));
+    let menu = shared.clone();
+    tray.on_about(move || menu_choice(&menu, &MenuAction::About));
+    let menu = shared.clone();
+    tray.on_quit(move || menu_choice(&menu, &MenuAction::Quit));
+}
+
+thread_local! {
+    /// Menu last handed to the tray icon, with the language of its fixed texts; set again only on a change.
+    static LAST_MENU: RefCell<Option<(Language, look::TrayMenu)>> = const { RefCell::new(None) };
+    /// The answer owed to the last choice in the menu: its message also goes out as a notification, because
+    /// the window may not be in front.
+    static MENU_FEEDBACK: RefCell<notify::MenuFeedback> = RefCell::default();
+    /// One protection against double clicks for the links of "About Celata" and the hint about a new version.
+    static LINK_DEBOUNCE: RefCell<donation::Debounce> = RefCell::default();
+}
+
+/// Builds the menu from the current state and hands it to the tray icon if it changed.
+fn show_tray_menu(window: &MainWindow, shared: &Shared) {
+    if TRAY.with(|tray| tray.borrow().is_none()) {
+        return;
+    }
+    let (display, view) = {
+        let monitor = lock(&shared.monitor);
+        (monitor.display().cloned(), monitor.view())
+    };
+    let (kill_switch, favorites) = {
+        let store = lock(&shared.settings);
+        (store.current.kill_switch, store.app.favorites.clone())
+    };
+    let visible = streaming::visible(&lock(&shared.streaming));
+    let selected = window.get_selected_host();
+    let language = i18n::current();
+    let update_version = UPDATE.with(|schedule| schedule.borrow().shown().map(|version| version.to_string()));
+    let menu = {
+        let countries = lock(&shared.countries);
+        let list = match window.get_list_state().as_str() {
+            "loading" => look::ListState::Loading,
+            "ready" => look::ListState::Ready,
+            _ if countries.is_empty() => look::ListState::Missing,
+            _ => look::ListState::Ready,
+        };
+        look::tray_menu(&look::TrayContext {
+            display: display.as_ref(),
+            view: &view,
+            kill_switch,
+            countries: &countries,
+            streaming: &visible,
+            favorites: &favorites,
+            list,
+            free_only: window.get_free_only(),
+            selected: &selected,
+            language,
+            update: update_version.as_deref(),
+        })
+    };
+    let changed = LAST_MENU.with(|last| {
+        let mut last = last.borrow_mut();
+        let changed = last
+            .as_ref()
+            .is_none_or(|(shown_language, shown)| *shown_language != language || *shown != menu);
+        if changed {
+            *last = Some((language, menu.clone()));
+        }
+        changed
+    });
+    if changed {
+        with_tray(|tray| apply_tray_menu(tray, &menu, language));
+    }
+}
+
+fn tray_place(place: &look::MenuPlace) -> TrayPlace {
+    TrayPlace {
+        label: place.label.as_str().into(),
+        host: place.host.as_str().into(),
+        enabled: place.enabled,
+        current: place.current,
+    }
+}
+
+fn tray_country(country: &look::MenuCountry) -> TrayCountry {
+    TrayCountry {
+        label: country.label.as_str().into(),
+        host: country.host.as_str().into(),
+        enabled: country.enabled,
+        current: country.current,
+        places: model(country.places.iter().map(tray_place).collect()),
+    }
+}
+
+fn model<T: Clone + 'static>(rows: Vec<T>) -> ModelRc<T> {
+    ModelRc::from(Rc::new(VecModel::from(rows)))
+}
+
+/// Sets every text and model of the menu. The menu has no scroll position; the models are replaced whole.
+fn apply_tray_menu(tray: &CelataTray, menu: &look::TrayMenu, language: Language) {
+    let text = |key| SharedString::from(i18n::text(language, key));
+    tray.set_show_label(text(Key::TrayShow));
+    tray.set_status_label(menu.status.as_str().into());
+    tray.set_main_label(menu.main.label.as_str().into());
+    tray.set_main_enabled(menu.main.enabled);
+    tray.set_best_label(text(Key::TrayBest));
+    tray.set_best_enabled(menu.best_enabled);
+    tray.set_side_shown(menu.side.is_some());
+    tray.set_side_label(
+        menu.side
+            .as_ref()
+            .map(|side| side.label.as_str())
+            .unwrap_or_default()
+            .into(),
+    );
+    tray.set_favorites_label(text(Key::TrayFavorites));
+    tray.set_favorites(model(menu.favorites.iter().map(tray_place).collect()));
+    tray.set_no_favorites_label(text(Key::TrayNoFavorites));
+    tray.set_favorite_toggle_label(menu.favorite_toggle.label.as_str().into());
+    tray.set_favorite_toggle_enabled(menu.favorite_toggle.enabled);
+    tray.set_locations_label(text(Key::TrayLocations));
+    tray.set_best_location_label(text(Key::BestName));
+    let (note, continents) = match &menu.locations {
+        look::MenuLocations::Loading => (text(Key::TrayLocationsLoading), Vec::new()),
+        look::MenuLocations::Missing => (text(Key::TrayLocationsMissing), Vec::new()),
+        look::MenuLocations::Ready(continents) => (SharedString::new(), continents.clone()),
+    };
+    tray.set_locations_note(note);
+    let continents = continents
+        .iter()
+        .map(|continent| TrayContinent {
+            label: continent.label.as_str().into(),
+            slots: model(
+                look::menu_slots(&continent.countries, look::MENU_SLOTS)
+                    .into_iter()
+                    .map(|slot| TraySlot {
+                        singles: model(slot.singles.iter().map(tray_country).collect()),
+                        groups: model(slot.groups.iter().map(tray_country).collect()),
+                    })
+                    .collect(),
+            ),
+        })
+        .collect();
+    tray.set_continents(model(continents));
+    tray.set_streaming_label(text(Key::TrayStreaming));
+    tray.set_streaming(model(menu.streaming.iter().map(tray_place).collect()));
+    tray.set_update_label(menu.update.as_deref().unwrap_or_default().into());
+    tray.set_about_label(text(Key::TrayAbout));
+    tray.set_quit_label(text(Key::TrayQuit));
+}
+
+/// Carries out a choice in the menu, decided in the state at the time of the choice.
+fn menu_choice(shared: &Shared, action: &MenuAction) {
+    let Some(window) = shared.window.upgrade() else { return };
+    let kill_switch = lock(&shared.settings).current.kill_switch;
+    let confirm_open = SHOWN.with(|shown| shown.borrow().confirm.is_some());
+    let selected = window.get_selected_host();
+    let (decision, notice_count) = {
+        let monitor = lock(&shared.monitor);
+        let view = monitor.view();
+        let decision = look::menu_decision(
+            action,
+            &look::MenuState {
+                display: monitor.display(),
+                view: &view,
+                dialog_open: confirm_open || window.get_dialog_open() || view.unblock_asked,
+                selected: &selected,
+                kill_switch,
+            },
+        );
+        (decision, monitor.notice_count())
+    };
+    // Choices that start something at the service, or may answer with a message, owe that answer.
+    if matches!(
+        decision,
+        MenuDecision::Connect(_)
+            | MenuDecision::StartThenConnect { .. }
+            | MenuDecision::Disconnect
+            | MenuDecision::Route
+    ) {
+        MENU_FEEDBACK.with(|feedback| feedback.borrow_mut().chosen(Instant::now(), notice_count));
+        REVEALED.set(false);
+    }
+    match decision {
+        MenuDecision::BringBack => bring_window_back(shared),
+        MenuDecision::Connect(host) => {
+            choose_location(&window, shared, &host);
+            start_connect(shared, host);
+        }
+        MenuDecision::StartThenConnect { target } => {
+            choose_location(&window, shared, &target);
+            start_service_then_connect(shared, target);
+        }
+        MenuDecision::Disconnect => {
+            start_disconnect(shared, false);
+        }
+        MenuDecision::Route => start_route(shared),
+        MenuDecision::AskUnblock => {
+            bring_window_back(shared);
+            let mut monitor = lock(&shared.monitor);
+            monitor.ask_unblock();
+            let _ = push(shared, &monitor);
+        }
+        MenuDecision::ToggleFavorite(host) => toggle_favorite(shared, &host),
+        MenuDecision::OpenUpdate => open_link(shared, update::RELEASES_URL, Key::UpdateBlockedNotice),
+        MenuDecision::Nothing => {}
+        MenuDecision::ShowAbout => {
+            bring_window_back(shared);
+            window.set_about_version(about::version_text(i18n::current()).into());
+            window.set_about_open(true);
+        }
+        MenuDecision::Quit => quit_from_menu(shared),
+    }
+}
+
+/// A location chosen in the menu becomes the selection of the window, as after a click in the list: the card
+/// "Location" and the lists show it completely.
+fn choose_location(window: &MainWindow, shared: &Shared, host: &str) {
+    let name = if best::is_best(host) {
+        tk(Key::BestName)
+    } else {
+        look::location_of(host, &lock(&shared.countries), i18n::current())
+            .map_or_else(|| SharedString::from(host), |(_, label)| SharedString::from(label))
+    };
+    window.set_selected_host(host.into());
+    window.set_selected_name(name);
+    show_location(window, &lock(&shared.countries));
+    show_lists(window, shared);
+}
+
+/// "Quit" in the menu: the same decision as closing the window with "Keep running after closing" off. If it
+/// asks, the window comes back first.
+fn quit_from_menu(shared: &Shared) {
+    let asks = matches!(lock(&shared.monitor).close_decision(), CloseDecision::Ask(_));
+    if asks {
+        bring_window_back(shared);
+    }
+    if request_close(shared) == CloseRequestResponse::HideWindow {
+        close_app(shared);
+    }
+}
+
+/// Opens a fixed address in the default browser, in a thread of its own, like the donation button. With
+/// blocked internet a notice; if the browser does not open, the link for copying.
+fn open_link(shared: &Shared, url: &'static str, blocked_notice: Key) {
+    if !LINK_DEBOUNCE.with(|debounce| debounce.borrow_mut().allow(Instant::now())) {
+        return;
+    }
+    if donation::is_blocked(lock(&shared.monitor).display()) {
+        show_toast(shared, Phrase::key(blocked_notice), false);
+    }
+    let failed = shared.clone();
+    spawn("link", move || {
+        if donation::open(url).is_err() {
+            show_toast_link(&failed, Phrase::key(donation::FAILED_NOTICE), url.to_owned());
+        }
+    });
+}
+
+/// The icon in the system tray, if there is one.
+fn with_tray(work: impl FnOnce(&CelataTray)) {
+    TRAY.with(|tray| {
+        if let Some(tray) = tray.borrow().as_ref() {
+            work(tray);
+        }
+    });
+}
+
+/// A new answer about the system tray. Creates the icon as soon as the tray is there, and sets state and text
+/// at once.
+fn on_presence(shared: &Shared, presence: TrayPresence) {
+    PRESENCE.set(presence);
+    if presence == TrayPresence::Shown {
+        ABSENT_SINCE.set(None);
+    } else if ABSENT_SINCE.get().is_none() {
+        ABSENT_SINCE.set(Some(Instant::now()));
+    }
+    if let Some(window) = shared.window.upgrade() {
+        window.set_tray_shown(presence == TrayPresence::Shown);
+    }
+    if presence.tray_available()
+        && TRAY.with(|tray| tray.borrow().is_none())
+        && let Some(tray) = create_tray(shared)
+    {
+        TRAY.with(|slot| *slot.borrow_mut() = Some(tray));
+        // Set colour, text and menu anew, also if they did not change since the last time.
+        STATE_ICON.with(|shown| *shown.borrow_mut() = None);
+        LAST_MENU.with(|last| *last.borrow_mut() = None);
+        let monitor = lock(&shared.monitor);
+        let view = monitor.view();
+        let state_color = look::state_color(monitor.display());
+        drop(monitor);
+        if let Some(window) = shared.window.upgrade() {
+            show_state_icon(shared, &window, &view, state_color);
+            show_tray_menu(&window, shared);
+        }
+    }
+}
+
+/// Starts the thread that watches the system tray.
+fn start_presence(shared: &Shared) {
+    let shared = shared.clone();
+    let started = presence::spawn(move |presence| {
+        let shared = shared.clone();
+        slint::invoke_from_event_loop(move || on_presence(&shared, presence)).is_ok()
+    });
+    if started.is_err() {
+        report(Phrase::fill(Key::TerminalThreadFailed, [Phrase::raw("presence")]));
+    }
+}
+
+/// The logo in the colour of the state, as a pixel image for the system tray and the window. Drawn once
+/// per colour; only use it in the window thread (`slint::Image` is not `Send`).
+fn logo(state: StateColor) -> Option<Image> {
+    LOGOS.with(|logos| {
+        logos
+            .borrow_mut()
+            .entry(state.as_str())
+            .or_insert_with(|| trayicon::render(state).map(Image::from_rgba8))
+            .clone()
+    })
+}
+
+thread_local! {
+    static LOGOS: RefCell<HashMap<&'static str, Option<Image>>> = RefCell::default();
+    /// Colour and hover text last handed to the tray icon and the window, so that they are only set again
+    /// when they change and not every second.
+    static STATE_ICON: RefCell<Option<(StateColor, String)>> = const { RefCell::new(None) };
+}
+
+/// Sets the logo in the colour of the state in the system tray and as window icon, and the hover text of
+/// the tray icon. Under Wayland the window icon has no effect yet.
+fn show_state_icon(shared: &Shared, window: &MainWindow, view: &StatusView, state_color: StateColor) {
+    let language = i18n::current();
+    let short = trayicon::short_state(view, &lock(&shared.countries), language);
+    let tooltip = trayicon::tooltip(language, &short);
+    let (color_changed, text_changed) = STATE_ICON.with(|shown| {
+        let mut shown = shown.borrow_mut();
+        let changed = match shown.as_ref() {
+            Some((color, text)) => (*color != state_color, *text != tooltip),
+            None => (true, true),
+        };
+        *shown = Some((state_color, tooltip.clone()));
+        changed
+    });
+    if color_changed && let Some(image) = logo(state_color) {
+        window.set_state_icon(image.clone());
+        with_tray(|tray| tray.set_state_icon(image));
+    }
+    if text_changed {
+        with_tray(|tray| tray.set_state_tooltip(tooltip.into()));
     }
 }
 
@@ -214,18 +669,50 @@ fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
     }
 }
 
+/// Language of the settings file for messages in the terminal; English without a file.
+fn stored_language() -> Language {
+    settings::load(settings::config_path().as_deref()).app.language
+}
+
 fn main() -> ExitCode {
-    // `celata --version` answers before anything else happens: no settings, no desktop entry, no
-    // window.
+    // Options answer before anything else happens: no desktop entry, no window, no icon, no name on the bus.
     // `args_os`: an argument that is not valid Unicode must not abort the start.
-    if cli::wants_version(
-        std::env::args_os()
-            .skip(1)
-            .map(|argument| argument.to_string_lossy().into_owned()),
-    ) {
-        println!("{}", cli::version_line());
-        return ExitCode::SUCCESS;
-    }
+    let command = cli::parse(std::env::args_os().map(|argument| argument.to_string_lossy().into_owned()));
+    let autostart = match command {
+        cli::Command::Gui { autostart } => autostart,
+        cli::Command::Version => {
+            println!("{}", cli::version_line());
+            return ExitCode::SUCCESS;
+        }
+        cli::Command::Help => {
+            println!("{}", cli::help_text(stored_language()));
+            return ExitCode::SUCCESS;
+        }
+        // The rule for polkit for "Fix permanently": only printed, no window, no bus, no service.
+        cli::Command::PolkitRule => {
+            print!("{}", unit::RULE);
+            return ExitCode::SUCCESS;
+        }
+        // "Unblock internet" without the window: no desktop entry, no icon, no name on the bus.
+        cli::Command::Unblock => {
+            let outcome = celata::unblock::unblock(
+                &Client::default(),
+                killswitch::is_blocked,
+                celata::unblock::Wait::default(),
+            );
+            let text = celata::unblock::message(&outcome, stored_language());
+            if celata::unblock::is_success(&outcome) {
+                println!("{text}");
+            } else {
+                eprintln!("{text}");
+            }
+            return ExitCode::from(celata::unblock::exit_code(&outcome));
+        }
+        cli::Command::Unknown(argument) => {
+            eprintln!("{}", cli::unknown_text(stored_language(), &argument));
+            return ExitCode::from(cli::EXIT_UNKNOWN);
+        }
+    };
     // Load the settings before the window, so that even the first picture appears in the stored
     // language.
     let settings_path = settings::config_path();
@@ -233,6 +720,21 @@ fn main() -> ExitCode {
     let loaded = settings::load(settings_path.as_deref());
     let language = loaded.app.language;
     i18n::set_current(language);
+    // Only one running window: a second start brings the first one back and ends. The connection keeps the
+    // name for the whole run.
+    let _instance = match instance::claim(|| {
+        let _ = slint::invoke_from_event_loop(|| {
+            ACTIVATE.with(|shared| {
+                if let Some(shared) = shared.borrow().as_ref() {
+                    bring_window_back(shared);
+                }
+            });
+        });
+    }) {
+        Claim::Other => return ExitCode::SUCCESS,
+        Claim::Owner(connection) => Some(connection),
+        Claim::NoBus => None,
+    };
     // Without a graphical session (neither Wayland nor X11 reachable) there is no window: a clear message
     // in the stored language instead of only the technical cause.
     let window = match MainWindow::new() {
@@ -271,10 +773,27 @@ fn main() -> ExitCode {
         streaming: Arc::new(Mutex::new(Check::Pending)),
         settings: Arc::new(Mutex::new(store)),
         client: Client::default(),
+        notifier: notify::spawn().ok(),
+        last_shown: Arc::new(Mutex::new(notify::Shown::default())),
+        session: Arc::new(Mutex::new(Session::default())),
     };
+    ACTIVATE.with(|activate| *activate.borrow_mut() = Some(shared.clone()));
+    // On every way of starting, also at login without the window: start the service if it does not run. Celata
+    // never connects by itself afterwards.
+    if lock(&shared.monitor).begin_startup_check() {
+        start_service_check(&shared);
+    }
+    LISTS.with(|lists| {
+        let lists = lists.borrow();
+        window.set_servers(ModelRc::from(lists.servers.clone()));
+        window.set_streaming_servers(ModelRc::from(lists.streaming.clone()));
+        window.set_favorites(ModelRc::from(lists.favorites.clone()));
+    });
     connect_settings(&window, &shared);
     connect_donation(&window, &shared);
+    connect_appearance(&window, &shared);
     connect_language(&window, &shared);
+    connect_application(&window, &shared);
     // Checks regularly whether a bundle of changes is due and whether the public address should be
     // determined or has exceeded its time limit.
     let bundle_timer = slint::Timer::default();
@@ -306,17 +825,18 @@ fn main() -> ExitCode {
     window.on_route_request(move || start_route(&route));
 
     let search = shared.clone();
-    window.on_search_changed(move |text| {
+    window.on_search_changed(move |_text| {
         if let Some(window) = search.window.upgrade() {
-            show_servers(&window, &lock(&search.countries), &text);
-            show_streaming(&window, &lock(&search.streaming), &text);
+            show_lists(&window, &search);
         }
     });
-    // The location of the overview follows the selection in the list.
+    // The location of the overview follows the selection in the list or in "Favorite locations"; the list
+    // shows a selection inside a folded country at the country.
     let selection = shared.clone();
     window.on_selection_changed(move |_host| {
         if let Some(window) = selection.window.upgrade() {
             show_location(&window, &lock(&selection.countries));
+            show_lists(&window, &selection);
         }
     });
     let reload = shared.clone();
@@ -324,11 +844,18 @@ fn main() -> ExitCode {
     let free = shared.clone();
     window.on_free_only_changed(move |_| {
         if let Some(window) = free.window.upgrade() {
-            show_servers(&window, &lock(&free.countries), &window.get_search_text());
+            show_lists(&window, &free);
         }
     });
+    connect_locations(&window, &shared);
     let connect = shared.clone();
-    window.on_connect(move |host| start_connect(&connect, host.to_string()));
+    window.on_connect(move |host| connect_or_start(&connect, &host));
+    // The command for "Fix permanently" names the running program; the path is shown only in the status card.
+    window.set_fix_rule_command(unit::rule_command(desktop::program_path().ok().as_deref()).into());
+    let start_service = shared.clone();
+    window.on_start_service_clicked(move || start_service_interactive(&start_service));
+    let guide = shared.clone();
+    window.on_setup_guide_clicked(move || open_link(&guide, about::SETUP_GUIDE_URL, Key::SetupGuideBlockedNotice));
     let disconnect = shared.clone();
     window.on_disconnect(move || {
         start_disconnect(&disconnect, false);
@@ -352,7 +879,20 @@ fn main() -> ExitCode {
 
     // Closing: immediately or only after a question, depending on the state.
     let close = shared.clone();
-    window.window().on_close_requested(move || request_close(&close));
+    window.window().on_close_requested(move || {
+        let keep_running = lock(&close.settings).app.keep_running;
+        let decision = lock(&close.monitor).close_decision();
+        if background::on_close(keep_running, PRESENCE.get(), decision) == CloseOutcome::Hide {
+            // Only the window goes; Celata, the connection and the icon stay. Nothing goes to the service.
+            WINDOW_HIDDEN.set(true);
+            return CloseRequestResponse::HideWindow;
+        }
+        let response = request_close(&close);
+        if response == CloseRequestResponse::HideWindow {
+            close_app(&close);
+        }
+        response
+    });
     let close_disconnect = shared.clone();
     window.on_close_disconnect(move || {
         let Some(window) = close_disconnect.window.upgrade() else {
@@ -364,25 +904,42 @@ fn main() -> ExitCode {
         if !start_disconnect(&close_disconnect, true)
             && request_close(&close_disconnect) == CloseRequestResponse::HideWindow
         {
-            let _ = window.hide();
+            close_app(&close_disconnect);
         }
     });
     // "Stay connected and close" does not call the service.
     let close_keep = shared.clone();
-    window.on_close_keep(move || {
-        if let Some(window) = close_keep.window.upgrade() {
-            let _ = window.hide();
-        }
-    });
+    window.on_close_keep(move || close_app(&close_keep));
 
+    // "Best location" is preselected; `apply_language` sets its name.
+    window.set_selected_host(best::BEST.into());
     // Set all texts in the stored language before the window appears. The streaming list also appears
     // complete at once, without waiting for the network or the server list.
     apply_language(&window, &shared, language);
     start_observer(&shared);
     load_servers(&shared);
     check_streaming(&shared);
+    start_presence(&shared);
 
-    match window.run() {
+    // The event loop runs until `close_app`: the window may be hidden while Celata keeps running. Started at
+    // login with "Keep running after closing", the window appears only if the icon does not within 30 seconds.
+    let keep_running = lock(&shared.settings).app.keep_running;
+    let shown = match background::start_mode(autostart, keep_running) {
+        StartMode::Window => window.show(),
+        StartMode::TrayOnly { wait } => {
+            WINDOW_HIDDEN.set(true);
+            START_DEADLINE.set(Some(Instant::now() + wait));
+            Ok(())
+        }
+    };
+    let restore_timer = slint::Timer::default();
+    let restore = shared.clone();
+    restore_timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), move || {
+        check_window_reachable(&restore);
+        check_update(&restore);
+    });
+    let result = shown.and_then(|()| slint::run_event_loop_until_quit());
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             report(Phrase::raw(error.to_string()));
@@ -394,18 +951,109 @@ fn main() -> ExitCode {
 /// Transfers the current display into the window. It is called under the lock of the monitor, so that
 /// the displays arrive in the right order; `invoke_from_event_loop` does not wait.
 fn push(shared: &Shared, monitor: &Monitor) -> Result<(), slint::EventLoopError> {
+    push_with(shared, monitor, false)
+}
+
+/// Like `push`, and brings a hidden window back once if a start of the service ended with a reason. Only where a
+/// start can end: the observation and the thread "service-start".
+fn push_revealing(shared: &Shared, monitor: &mut Monitor) -> Result<(), slint::EventLoopError> {
+    let reveal = monitor.take_reveal();
+    push_with(shared, monitor, reveal)
+}
+
+fn push_with(shared: &Shared, monitor: &Monitor, reveal: bool) -> Result<(), slint::EventLoopError> {
     let view = monitor.view();
+    let next = notify::Shown {
+        display: monitor.display().cloned(),
+        connect_target: view.connect_target.clone(),
+    };
+    let event = {
+        let mut last = lock(&shared.last_shown);
+        let event = notify::event(&last, &next);
+        *last = next;
+        event
+    };
     let tone = look::tone(monitor.display()).as_str();
+    let state_color = look::state_color(monitor.display());
     let button = look::main_button(monitor.display(), &view);
     let connected = matches!(monitor.display(), Some(DisplayState::Connected { .. }));
+    let notice_count = monitor.notice_count();
     let shared = shared.clone();
     slint::invoke_from_event_loop(move || {
         if let Some(window) = shared.window.upgrade() {
-            show(&window, &view, tone, button);
+            show(&window, &view, tone, button, state_color, &lock(&shared.countries));
+            show_state_icon(&shared, &window, &view, state_color);
             show_location(&window, &lock(&shared.countries));
+            show_tray_menu(&window, &shared);
+            // "Connected" in the lists follows the connected server; built anew only when it changes.
+            let connected_host = window.get_connected_host();
+            if LISTS.with(|lists| lists.borrow().connected != connected_host) {
+                show_lists(&window, &shared);
+            }
             show_settings_state(&window, &lock(&shared.settings), connected);
+            if reveal {
+                bring_message_back(&shared);
+                REVEALED.set(true);
+            }
+            let notice = view.notice.as_ref().map(|notice| &notice.text);
+            notify_change(&shared, &window, event, notice, notice_count);
         }
     })
+}
+
+thread_local! {
+    static DEDUP: RefCell<notify::Dedup> = RefCell::default();
+}
+
+/// Sends a notification for a change while the window is not in front, and the message of the status card that
+/// answers a choice in the menu (also when it has the text of an earlier one).
+fn notify_change(
+    shared: &Shared,
+    window: &MainWindow,
+    event: Option<notify::Event>,
+    notice: Option<&Phrase>,
+    notice_count: u64,
+) {
+    let notifications = lock(&shared.settings).app.notifications;
+    let front = window_in_front(window);
+    let delivery = notify::Delivery {
+        notifications,
+        front,
+        revealed: REVEALED.get(),
+    };
+    let answer = MENU_FEEDBACK.with(|feedback| {
+        feedback
+            .borrow_mut()
+            .settle(notice, notice_count, event.is_some(), delivery, Instant::now())
+    });
+    let show = notify::should_show(notifications, front);
+    let send = |event: &notify::Event| {
+        if show && let Some(notifier) = &shared.notifier {
+            let body = notify::body(event, i18n::current(), &lock(&shared.countries));
+            let _ = notifier.send(body);
+        }
+    };
+    if let Some(event) = event
+        && DEDUP.with(|dedup| dedup.borrow_mut().admit(&event))
+    {
+        send(&event);
+    }
+    match answer {
+        // The answer to a choice goes out even if the same text went out before; it counts as the last event.
+        Some(notify::Feedback::Notify(answer)) => {
+            DEDUP.with(|dedup| dedup.borrow_mut().admit(&answer));
+            send(&answer);
+        }
+        // Without notifications the window comes back with the message.
+        Some(notify::Feedback::Reveal) => bring_message_back(shared),
+        None => {}
+    }
+}
+
+thread_local! {
+    /// The window came back since the last choice in the menu because a start of the service ended with a reason;
+    /// the answer to the choice is then in the window already.
+    static REVEALED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Starts the permanent observation of the service. It checks again by itself, which is why there is
@@ -417,18 +1065,137 @@ fn start_observer(shared: &Shared) {
             let mut monitor = lock(&shared.monitor);
             let (flow, changed) = monitor.observe(observation);
             // The event loop is no longer running: the window is closed.
-            if changed && push(&shared, &monitor).is_err() {
+            if changed && push_revealing(&shared, &mut monitor).is_err() {
                 return Flow::Stop;
             }
+            connect_after_start(&shared, &mut monitor);
             flow
         });
     });
 }
 
+/// Every wish to connect from the window (main button, double click in a list or in "Favorite locations"): with
+/// an answering service as before, with an unreachable one Celata starts the service first and connects after
+/// its first answer.
+fn connect_or_start(shared: &Shared, target: &str) {
+    let wish = {
+        let monitor = lock(&shared.monitor);
+        look::connect_wish(monitor.display(), &monitor.view(), target)
+    };
+    match wish {
+        ConnectWish::Connect(target) => start_connect(shared, target),
+        ConnectWish::StartThenConnect(target) => start_service_then_connect(shared, target),
+        ConnectWish::Nothing => {}
+    }
+}
+
+/// Starts the service for a wish to connect; `target` ("Best location" as the mark) is resolved only after the
+/// first answer of the service.
+fn start_service_then_connect(shared: &Shared, target: String) {
+    let started = {
+        let mut monitor = lock(&shared.monitor);
+        let started = monitor.request_start(Some(target));
+        if started {
+            let _ = push(shared, &monitor);
+        }
+        started
+    };
+    if started {
+        start_service_check(shared);
+    }
+}
+
+/// After the first answer of a service Celata started for a wish to connect: connect to its target, in the window
+/// thread like a click.
+fn connect_after_start(shared: &Shared, monitor: &mut Monitor) {
+    if let Some(target) = monitor.take_connect_after_start() {
+        let shared = shared.clone();
+        let _ = slint::invoke_from_event_loop(move || start_connect(&shared, target));
+    }
+}
+
+/// Thread "service-start": reads the unit and the group, starts the unit without a password prompt if that is the
+/// decision, and follows the start. The monitor allows only one start at a time.
+fn start_service_check(shared: &Shared) {
+    let shared = shared.clone();
+    spawn("service-start", move || {
+        let info = unit::read_unit(state::SERVICE_UNIT);
+        let (status, groups) = unit::read_group_inputs();
+        let group = unit::group_check(&status, &groups, unit::GROUP);
+        let before = unit::before_start(info.as_ref(), group);
+        let start = {
+            let mut monitor = lock(&shared.monitor);
+            let start = monitor.startup_decided(before, group);
+            let _ = push_revealing(&shared, &mut monitor);
+            start
+        };
+        if start {
+            let result = unit::classify(&unit::start_unit(state::SERVICE_UNIT));
+            let mut monitor = lock(&shared.monitor);
+            monitor.start_answered(result);
+            let _ = push_revealing(&shared, &mut monitor);
+        }
+        follow_start(&shared);
+    });
+}
+
+/// The button "Start service": the only start that lets the system ask for the password, through the agent of the
+/// desktop.
+fn start_service_interactive(shared: &Shared) {
+    {
+        let mut monitor = lock(&shared.monitor);
+        if !monitor.begin_interactive_start() {
+            return;
+        }
+        let _ = push(shared, &monitor);
+    }
+    let shared = shared.clone();
+    spawn("service-start", move || {
+        let result = unit::classify_interactive(&unit::start_unit_interactive(state::SERVICE_UNIT));
+        {
+            let mut monitor = lock(&shared.monitor);
+            monitor.interactive_answered(result);
+            let _ = push_revealing(&shared, &mut monitor);
+        }
+        follow_start(&shared);
+    });
+}
+
+/// Reads the state of the unit every second while the start this thread follows runs, until the service answers,
+/// the unit failed or the waiting time is over. Never starts anything itself. A reading for a start that ended in
+/// the meantime has no effect on a newer one, which its own thread follows.
+fn follow_start(shared: &Shared) {
+    // A statement of its own, so that the lock is released before the next one.
+    let followed = lock(&shared.monitor).start_since();
+    let Some(since) = followed else { return };
+    loop {
+        thread::sleep(Duration::from_secs(1));
+        let progress = unit::poll(unit::read_unit(state::SERVICE_UNIT).as_ref(), since.elapsed());
+        let mut monitor = lock(&shared.monitor);
+        let running = monitor.start_progress_for(since, progress);
+        if push_revealing(shared, &mut monitor).is_err() || !running {
+            return;
+        }
+    }
+}
+
 /// Connects in the background, or switches the server while a connection exists. A second click during
 /// an operation does nothing. If the routes have to be rebuilt from "Internet blocked", Celata asks
 /// first, because the internet is free for a moment while doing so.
+///
+/// "Best location" (`best::BEST`, also an empty selection) is resolved here and only here into a host of the
+/// list: time zone or system language of this computer and the loaded list, no request.
+/// The mark itself never reaches the service.
 fn start_connect(shared: &Shared, host: String) {
+    let pick = if best::is_best(&host) {
+        let origin = zone::system_origin();
+        match pick_best(shared, origin.as_ref()) {
+            Some(pick) => pick,
+            None => return,
+        }
+    } else {
+        Pick::own(host)
+    };
     let blocked_start = {
         let monitor = lock(&shared.monitor);
         monitor.view().can_connect && monitor.display() == Some(&DisplayState::Blocked)
@@ -441,7 +1208,7 @@ fn start_connect(shared: &Shared, host: String) {
             // Text: the routes have to be rebuilt, the internet is unprotected for a moment while doing so.
             ask(
                 shared,
-                Awaiting::Connect(host),
+                Awaiting::Connect(pick),
                 Phrase::key(Key::ConfirmRebuildTitle),
                 Phrase::key(Key::ConfirmRebuildText),
                 Phrase::key(Key::ConfirmRebuildOk),
@@ -449,25 +1216,72 @@ fn start_connect(shared: &Shared, host: String) {
             return;
         }
     }
-    begin_connect(shared, host, false);
+    begin_connect(shared, pick, false);
+}
+
+/// Carries out the decision of `best::choose` for "Best location": a notice without any call, or the host
+/// with the further candidates. Only in the window thread.
+fn pick_best(shared: &Shared, origin: Option<&best::Origin>) -> Option<Pick> {
+    let window = shared.window.upgrade()?;
+    let ranked = {
+        let countries = lock(&shared.countries);
+        let session = lock(&shared.session);
+        best::rank(
+            &countries,
+            origin,
+            window.get_list_state() == "loading",
+            window.get_free_only(),
+            session.best.excluded(),
+        )
+    };
+    let connected = lock(&shared.monitor).view().connected_host;
+    let connected = (!connected.is_empty()).then_some(connected.as_str());
+    match best::choose(ranked, connected) {
+        Choice::Inform(key) => {
+            inform(shared, key);
+            None
+        }
+        Choice::Already(host) => {
+            if inform(shared, Key::NoticeBestAlready) {
+                lock(&shared.session).best.started(true, &host);
+                show_lists(&window, shared);
+            }
+            None
+        }
+        Choice::Go { host, rest } => Some(Pick { host, best: Some(rest) }),
+    }
+}
+
+/// Shows a notice in the status card without starting anything; nothing goes to the service. Returns
+/// whether it is shown (not while an operation is running).
+fn inform(shared: &Shared, key: Key) -> bool {
+    let mut monitor = lock(&shared.monitor);
+    let shown = monitor.inform(Phrase::key(key));
+    if shown {
+        let _ = push(shared, &monitor);
+    }
+    shown
 }
 
 /// Starts connecting. `confirmed`: the question about the rebuild was confirmed.
-fn begin_connect(shared: &Shared, host: String, confirmed: bool) {
+fn begin_connect(shared: &Shared, pick: Pick, confirmed: bool) {
     let start = {
         let mut monitor = lock(&shared.monitor);
-        let Some(start) = monitor.begin_connect(&host) else {
+        let Some(start) = monitor.begin_connect(&pick.host) else {
             return;
         };
         let _ = push(shared, &monitor);
         start
     };
+    // "Chosen: …" belongs to "Best location" only; an own choice removes it.
+    lock(&shared.session).best.started(pick.via_best(), &pick.host);
     let was_free = match start {
         Start::Connect { was_free } => was_free,
-        Start::Switch { from } => return start_switch(shared, from, host),
+        Start::Switch { from } => return start_switch(shared, from, pick),
     };
     let shared = shared.clone();
     spawn("connect", move || {
+        let host = pick.host.clone();
         let (target, mut ledger) = {
             let store = lock(&shared.settings);
             (
@@ -484,15 +1298,85 @@ fn begin_connect(shared: &Shared, host: String, confirmed: bool) {
             monitor.finish_connect(&result);
             let _ = push(&shared, &monitor);
         }
+        if result.name_failed() {
+            // Without a check of names beforehand: the next attempt takes the next candidate.
+            if pick.via_best() {
+                lock(&shared.session).best.failed(&host);
+            }
+            forget_derived(&shared, &host);
+        }
         refresh(&shared);
     });
 }
 
+/// Target of a switch through "Best location": the first candidate with an address, at most
+/// `best::MAX_TRIES` names. Candidates without an address leave "Best location" for this session.
+/// Returns the target, or `None` if the switch already ended here.
+fn best_switch_target(shared: &Shared, from: &str, pick: &Pick, rest: &[String]) -> Option<String> {
+    let mut hosts = vec![pick.host.clone()];
+    hosts.extend(rest.iter().cloned());
+    let (found, without_address) = switch::first_reachable(&hosts, streaming::resolves);
+    {
+        let mut session = lock(&shared.session);
+        for host in &without_address {
+            session.best.failed(host);
+        }
+    }
+    let Some(found) = found else {
+        // As for every switch to a name without an address; the connection stays.
+        let mut monitor = lock(&shared.monitor);
+        monitor.finish_switch(&SwitchResult::Unreachable);
+        let _ = push(shared, &monitor);
+        return None;
+    };
+    if found == pick.host {
+        return Some(found);
+    }
+    match best::choose(Ok(vec![found]), Some(from)) {
+        Choice::Go { host, .. } => {
+            let mut monitor = lock(&shared.monitor);
+            if monitor.retarget(&host) {
+                let _ = push(shared, &monitor);
+                drop(monitor);
+                lock(&shared.session).best.started(true, &host);
+            }
+            Some(host)
+        }
+        // The connected server is the best reachable one after all: no call to the service.
+        Choice::Already(_) | Choice::Inform(_) => {
+            let mut monitor = lock(&shared.monitor);
+            let ended = monitor.abandon_switch(Phrase::key(Key::NoticeBestAlready));
+            let _ = push(shared, &monitor);
+            drop(monitor);
+            if ended {
+                lock(&shared.session).best.started(true, from);
+                return None;
+            }
+            // "Disconnect" was requested meanwhile: the switch thread carries it out.
+            Some(from.to_owned())
+        }
+    }
+}
+
 /// Switches from `from` to `to` in the background. The same thread also carries out a requested
 /// "Disconnect", so that no `/connect` follows after `/destroy`.
-fn start_switch(shared: &Shared, from: String, to: String) {
+fn start_switch(shared: &Shared, from: String, pick: Pick) {
     let shared = shared.clone();
     spawn("switch", move || {
+        // Through "Best location" the target is the first candidate with an address; that name is not queried
+        // a second time.
+        let (to, checked) = match &pick.best {
+            None => (pick.host.clone(), None),
+            Some(rest) => match best_switch_target(&shared, &from, &pick, rest) {
+                Some(found) => (found.clone(), Some(found)),
+                None => {
+                    refresh_lists(&shared);
+                    refresh(&shared);
+                    return;
+                }
+            },
+        };
+        let resolves = |host: &str| checked.as_deref() == Some(host) || streaming::resolves(host);
         let (current, mut ledger) = {
             let store = lock(&shared.settings);
             (
@@ -509,7 +1393,7 @@ fn start_switch(shared: &Shared, from: String, to: String) {
             Class::Reconnect,
             // While a connection exists, `Ok(true)` here means "block ready".
             killswitch::is_blocked,
-            streaming::resolves,
+            resolves,
             |phase| {
                 let mut monitor = lock(&shared.monitor);
                 let proceed = monitor.switch_proceed(phase);
@@ -528,7 +1412,47 @@ fn start_switch(shared: &Shared, from: String, to: String) {
             monitor.finish_switch(&result);
             let _ = push(&shared, &monitor);
         }
+        if result.name_failed() {
+            if pick.via_best() {
+                lock(&shared.session).best.failed(&to);
+            }
+            forget_derived(&shared, &to);
+        }
+        refresh_lists(&shared);
         refresh(&shared);
+    });
+}
+
+/// A connection or switch with `host` failed. If it is a country name built by Celata, hide.me does not
+/// know it: it is left out until the end of the session (also after loading the list again), and the
+/// country only folds and unfolds. The usual message about the failure stays as it is. Other hosts are not
+/// touched.
+fn forget_derived(shared: &Shared, host: &str) {
+    {
+        let mut countries = lock(&shared.countries);
+        if !servers::is_derived(&countries, host) {
+            return;
+        }
+        let mut session = lock(&shared.session);
+        session.failed_derived.insert(host.to_owned());
+        servers::drop_derived(&mut countries, &session.failed_derived);
+    }
+    let shared = shared.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(window) = shared.window.upgrade() {
+            show_lists(&window, &shared);
+            show_location(&window, &lock(&shared.countries));
+        }
+    });
+}
+
+/// Builds the location lists anew in the window thread, for example after "Best location" chose another host.
+fn refresh_lists(shared: &Shared) {
+    let shared = shared.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(window) = shared.window.upgrade() {
+            show_lists(&window, &shared);
+        }
     });
 }
 
@@ -546,7 +1470,8 @@ fn refresh(shared: &Shared) {
     };
     let mut monitor = lock(&shared.monitor);
     monitor.observe(observation);
-    let _ = push(shared, &monitor);
+    let _ = push_revealing(shared, &mut monitor);
+    connect_after_start(shared, &mut monitor);
 }
 
 /// Disconnects in the background with `/destroy`. With `closing` the window only closes after success;
@@ -581,12 +1506,8 @@ fn finish_disconnect(shared: &Shared, result: &Result<(), celata::daemon::Error>
         close
     };
     if close {
-        let window = shared.window.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(window) = window.upgrade() {
-                let _ = window.hide();
-            }
-        });
+        let shared = shared.clone();
+        let _ = slint::invoke_from_event_loop(move || close_app(&shared));
     } else {
         refresh(shared);
     }
@@ -612,6 +1533,84 @@ fn start_unblock(shared: &Shared) {
         }
         refresh(&shared);
     });
+}
+
+/// Ends Celata: hides the window and the icon in the system tray and stops the event loop. Every way of
+/// closing goes through here, because a visible tray icon would otherwise keep the event loop running and
+/// Celata would go on invisibly.
+fn close_app(shared: &Shared) {
+    if let Some(window) = shared.window.upgrade() {
+        let _ = window.hide();
+    }
+    with_tray(|tray| {
+        let _ = tray.hide();
+    });
+    let _ = slint::quit_event_loop();
+}
+
+/// Click on the icon in the system tray: shows the window again and restores it if it is minimised.
+/// Nothing else; the icon never connects, disconnects or blocks.
+fn bring_window_back(shared: &Shared) {
+    WINDOW_HIDDEN.set(false);
+    START_DEADLINE.set(None);
+    if let Some(window) = shared.window.upgrade() {
+        let _ = window.show();
+        window.window().set_minimized(false);
+        // After a start without the window, Slint draws the first picture of the newly created window only with the
+        // next event (a mouse movement, for example); until then the desktop shows nothing. Ask for it at once.
+        window.window().request_redraw();
+    }
+}
+
+/// Brings the window back for a message of the status card (a failed start of the service, or the answer to a
+/// choice in the menu without notifications) and shows the overview, where the message stands.
+fn bring_message_back(shared: &Shared) {
+    bring_window_back(shared);
+    if let Some(window) = shared.window.upgrade() {
+        window.set_page("overview".into());
+    }
+}
+
+thread_local! {
+    /// Celata hid the window (closed with "Keep running after closing", or started at login). Only used in the
+    /// window thread.
+    static WINDOW_HIDDEN: Cell<bool> = const { Cell::new(false) };
+    /// Start at login without the window: until then the icon has to appear, otherwise the window comes.
+    static START_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// Since when the icon has not been shown; `None` while it is.
+    static ABSENT_SINCE: Cell<Option<Instant>> = Cell::new(Some(Instant::now()));
+    /// For `Activate()` of a second start, which arrives before `main` could hand anything over otherwise.
+    static ACTIVATE: RefCell<Option<Shared>> = const { RefCell::new(None) };
+}
+
+/// Celata must never run on unreachable: a hidden window comes back when the icon is missing for 10 seconds,
+/// or after a start at login when it has not appeared within 30 seconds.
+fn check_window_reachable(shared: &Shared) {
+    let now = Instant::now();
+    if let Some(deadline) = START_DEADLINE.get() {
+        if PRESENCE.get() == TrayPresence::Shown {
+            START_DEADLINE.set(None);
+        } else if now >= deadline {
+            bring_window_back(shared);
+        }
+        return;
+    }
+    if background::should_restore(WINDOW_HIDDEN.get(), ABSENT_SINCE.get(), now) {
+        bring_window_back(shared);
+    }
+}
+
+/// The window can be seen and has the focus. Without access to the winit window it counts as not in front, so
+/// that a notification rather appears once too often.
+fn window_in_front(window: &MainWindow) -> bool {
+    use slint::winit_030::WinitWindowAccessor;
+    !WINDOW_HIDDEN.get()
+        && window.window().is_visible()
+        && !window.window().is_minimized()
+        && window
+            .window()
+            .with_winit_window(slint::winit_030::winit::window::Window::has_focus)
+            == Some(true)
 }
 
 /// Decides on closing the window whether to ask.
@@ -648,6 +1647,8 @@ fn load_servers(shared: &Shared) {
     if let Some(window) = shared.window.upgrade() {
         window.set_list_state("loading".into());
         set_list_message(&window, None);
+        // Standard favourites show "Loading …" at once, also when loading again after a failure.
+        show_lists(&window, shared);
     }
     let shared = shared.clone();
     spawn("server-list", move || {
@@ -663,16 +1664,20 @@ fn load_servers(shared: &Shared) {
                     };
                     set_list_message(&window, message);
                     window.set_list_state("ready".into());
-                    *lock(&shared.countries) = loaded.countries;
+                    let mut countries = loaded.countries;
+                    // Built country names that failed in this session stay away.
+                    servers::drop_derived(&mut countries, &lock(&shared.session).failed_derived);
+                    *lock(&shared.countries) = countries;
                 }
                 Err(error) => {
                     set_list_message(&window, Some(error.phrase()));
                     window.set_list_state("error".into());
                 }
             }
-            let countries = lock(&shared.countries);
-            show_servers(&window, &countries, &window.get_search_text());
-            show_location(&window, &countries);
+            show_lists(&window, &shared);
+            show_location(&window, &lock(&shared.countries));
+            // Titles such as "Connecting to Germany, Berlin (…) …" name the location only with the list.
+            let _ = push(&shared, &lock(&shared.monitor));
         });
     });
 }
@@ -696,25 +1701,168 @@ fn set_categories_message(window: &MainWindow, message: Option<Phrase>) {
 }
 
 /// Converts a row from `look` into the type of the user interface, with the flag from the image cache.
-fn server_row(row: LocationRow) -> ServerRow {
-    ServerRow {
-        flag: flag(&row.code),
-        country: row.country.into(),
-        place: row.place.into(),
-        host: row.host.into(),
+fn location_item(row: &look::LocationItem) -> LocationItem {
+    LocationItem {
+        kind: row.kind.as_str().into(),
+        flag: if row.code.is_empty() {
+            Image::default()
+        } else {
+            flag(&row.code)
+        },
+        country: row.country.as_str().into(),
+        place: row.place.as_str().into(),
+        host: row.host.as_str().into(),
+        star_host: row.star_host.as_str().into(),
         free: row.free,
-        choice: row.choice.into(),
+        choice: row.choice.as_str().into(),
+        favorite: row.favorite,
+        expandable: row.expandable,
+        expanded: row.expanded,
+        holds_selected: row.holds_selected,
+        holds_connected: row.holds_connected,
+        code: row.code.as_str().into(),
     }
 }
 
-/// Shows the servers matching the search term, one row per location; with "Free only" only those.
-fn show_servers(window: &MainWindow, countries: &[Country], query: &str) {
-    let mut rows = look::location_rows(&servers::search(countries, query), i18n::current());
-    if window.get_free_only() {
-        rows = look::free_only(rows);
+/// Converts a row of "Favorite locations" into the type of the user interface.
+fn favorite_item(row: &look::FavoriteItem) -> FavoriteItem {
+    FavoriteItem {
+        flag: if row.code.is_empty() {
+            Image::default()
+        } else {
+            flag(&row.code)
+        },
+        label: row.label.as_str().into(),
+        host: row.host.as_str().into(),
+        star_host: row.star_host.as_str().into(),
+        state: row.state.as_str().into(),
+        streaming: row.streaming,
+        connected: row.connected,
+        choice: row.choice.as_str().into(),
+        best: row.best,
     }
-    let rows: Vec<ServerRow> = rows.into_iter().map(server_row).collect();
-    window.set_servers(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+/// Replaces in `model` only the range in which `new` differs from the rows shown so far (`look::splice`), so
+/// that the list keeps its scroll position. Returns that range, so that the caller can keep the visible rows
+/// in place (`look::scroll_after`).
+fn replace_rows<T: PartialEq, U: Clone + 'static>(
+    model: &VecModel<U>,
+    shown: &mut Vec<T>,
+    new: Vec<T>,
+    convert: impl Fn(&T) -> U,
+) -> Option<(usize, usize, usize)> {
+    let range = look::splice(shown, &new)?;
+    let (start, removed, inserted) = range;
+    let same = removed.min(inserted);
+    for (index, row) in new.iter().enumerate().skip(start).take(same) {
+        model.set_row_data(index, convert(row));
+    }
+    if removed > inserted {
+        for _ in inserted..removed {
+            model.remove(start + inserted);
+        }
+    } else {
+        for (index, row) in new.iter().enumerate().skip(start + removed).take(inserted - removed) {
+            model.insert(index, convert(row));
+        }
+    }
+    *shown = new;
+    Some(range)
+}
+
+/// Builds the tabs "Standard" and "Streaming" of the page "Locations" and "Favorite locations" of the
+/// overview anew from the current state: search, "Free only", unfolded countries, selection, connected
+/// server and favourites.
+fn show_lists(window: &MainWindow, shared: &Shared) {
+    let language = i18n::current();
+    let query = window.get_search_text();
+    let selected = window.get_selected_host();
+    let connected_host = window.get_connected_host();
+    let connected = (!connected_host.is_empty()).then_some(connected_host.as_str());
+    let loading = window.get_list_state() == "loading";
+    let favorites = lock(&shared.settings).app.favorites.clone();
+    let (expanded, best_host) = {
+        let session = lock(&shared.session);
+        (session.expanded.clone(), session.best.host().map(str::to_owned))
+    };
+    let visible = streaming::visible(&lock(&shared.streaming));
+    let countries = lock(&shared.countries);
+    let ctx = look::ListContext {
+        countries: &countries,
+        language,
+        query: &query,
+        free_only: window.get_free_only(),
+        expanded: &expanded,
+        selected: &selected,
+        connected,
+        favorites: &favorites,
+        loading,
+        best_host: best_host.as_deref(),
+    };
+    let standard = look::location_items(&ctx);
+    let streaming_rows = look::streaming_items(&visible, &ctx);
+    let favorite_rows = look::favorite_items(&favorites, &countries, &visible, loading, connected, language);
+    drop(countries);
+    LISTS.with(|lists| {
+        let mut lists = lists.borrow_mut();
+        let lists = &mut *lists;
+        let changed = replace_rows(&lists.servers, &mut lists.shown_servers, standard, location_item);
+        window.set_servers_scroll(look::scroll_after(changed, window.get_servers_scroll()));
+        let changed = replace_rows(
+            &lists.streaming,
+            &mut lists.shown_streaming,
+            streaming_rows,
+            location_item,
+        );
+        window.set_streaming_scroll(look::scroll_after(changed, window.get_streaming_scroll()));
+        // "Favorite locations" is short and sits in the overview; there the position follows the list view.
+        replace_rows(
+            &lists.favorites,
+            &mut lists.shown_favorites,
+            favorite_rows,
+            favorite_item,
+        );
+        lists.connected = connected_host.clone();
+    });
+    // Favourites, "Free only", the list and the selection are part of the menu as well.
+    show_tray_menu(window, shared);
+}
+
+/// Connects star and arrow. Neither of them selects, connects or calls the service.
+fn connect_locations(window: &MainWindow, shared: &Shared) {
+    // Star: save at once like the donation hint, not through `handle_edit`: no validation, no question, no 2
+    // second period, nothing to the service, no reconnect.
+    let star = shared.clone();
+    window.on_toggle_favorite(move |host| toggle_favorite(&star, &host));
+    // Arrow: unfolded countries are only remembered for this session.
+    let arrow = shared.clone();
+    window.on_toggle_country(move |code| {
+        let Some(window) = arrow.window.upgrade() else { return };
+        {
+            let mut session = lock(&arrow.session);
+            if !session.expanded.remove(code.as_str()) {
+                session.expanded.insert(code.to_string());
+            }
+        }
+        show_lists(&window, &arrow);
+    });
+}
+
+/// Star in the window or entry in the menu: save at once, refresh lists, "Favorite locations" and menu.
+fn toggle_favorite(shared: &Shared, host: &str) {
+    let Some(window) = shared.window.upgrade() else { return };
+    let mut store = lock(&shared.settings);
+    favorites::toggle(&mut store.app.favorites, host);
+    if let Some(path) = &store.settings_path {
+        match settings::save(path, &store.current, &store.kept, &store.app) {
+            Ok(()) => set_file_notice(&window, None),
+            Err(error) => set_file_notice(&window, Some(save_failed(&error))),
+        }
+    }
+    drop(store);
+    // The display follows the star even if saving fails.
+    show_lists(&window, shared);
 }
 
 /// Checks once per program start which streaming names still exist. The result is neither stored nor
@@ -726,26 +1874,18 @@ fn check_streaming(shared: &Shared) {
         let _ = slint::invoke_from_event_loop(move || {
             *lock(&shared.streaming) = result;
             if let Some(window) = shared.window.upgrade() {
-                show_streaming(&window, &lock(&shared.streaming), &window.get_search_text());
+                show_lists(&window, &shared);
             }
         });
     });
 }
 
-/// Shows the streaming servers that are visible and match the search term, one row per country.
-fn show_streaming(window: &MainWindow, check: &Check, query: &str) {
-    let rows: Vec<ServerRow> =
-        look::streaming_rows(&streaming::search(&streaming::visible(check), query), i18n::current())
-            .into_iter()
-            .map(server_row)
-            .collect();
-    window.set_streaming_servers(ModelRc::from(Rc::new(VecModel::from(rows))));
-}
-
 /// Sets the location of the overview by `look::overview_location` from the current values of the window.
 fn show_location(window: &MainWindow, countries: &[Country]) {
+    let target = CONNECT_TARGET.with(|target| target.borrow().clone());
     let location = look::overview_location(
         &window.get_connected_host(),
+        target.as_deref(),
         &window.get_selected_host(),
         &window.get_selected_name(),
         countries,
@@ -753,22 +1893,38 @@ fn show_location(window: &MainWindow, countries: &[Country]) {
     );
     window.set_location_label(location.label.into());
     window.set_location_flag(location.code.as_deref().map(flag).unwrap_or_default());
+    window.set_location_best(location.best);
 }
 
 /// Transfers the display into the window.
-fn show(window: &MainWindow, view: &StatusView, tone: &str, button: MainButton) {
+fn show(
+    window: &MainWindow,
+    view: &StatusView,
+    tone: &str,
+    button: MainButton,
+    state_color: StateColor,
+    countries: &[Country],
+) {
     let language = i18n::current();
-    // During a switch: "Switching to de.hideservers.net …" or "Returning to … …"; the server stands for
-    // `{0}` in the title.
-    let title = match &view.switch_target {
-        Some(target) => Phrase::fill(view.message.title, [streaming::server_label(target)]),
+    CONNECT_TARGET.with(|target| target.borrow_mut().clone_from(&view.connect_target));
+    // During a switch or an own connection attempt: "Switching to Germany, Berlin (berlin.hideservers.net) …",
+    // "Connecting to … …" or "Returning to … …"; the target stands for `{0}` in the title.
+    let target = view.switch_target.as_ref().or(view.connect_target.as_ref());
+    let title = match target {
+        Some(target) => Phrase::fill(
+            view.message.title,
+            [Phrase::raw(look::target_label(target, countries, language))],
+        ),
         None => Phrase::key(view.message.title),
     };
     window.set_status_title(tr(&title));
-    // Sidebar: "Switching to Streaming Japan …" instead of with the host name in brackets, so that the
-    // whole state stays readable there.
-    let short = match &view.switch_target {
-        Some(target) => Phrase::fill(view.message.title, [streaming::short_label(target)]),
+    // Sidebar: "Switching to Germany, Berlin …" without the host name in brackets, so that the whole state
+    // stays readable there.
+    let short = match target {
+        Some(target) => Phrase::fill(
+            view.message.title,
+            [Phrase::raw(look::target_short(target, countries, language))],
+        ),
         None => Phrase::key(view.message.title),
     };
     window.set_status_short(tr(&short));
@@ -785,11 +1941,17 @@ fn show(window: &MainWindow, view: &StatusView, tone: &str, button: MainButton) 
     window.set_command(view.message.command.unwrap_or_default().into());
     window.set_warning(view.message.warning);
     window.set_tone(tone.into());
+    window.set_state_color(state_color.as_str().into());
     window.set_main_label(tk(button.label));
     window.set_main_action(button.action.as_str().into());
     window.set_main_side(button.side.as_str().into());
     window.set_main_side_label(button.side_label.map(tk).unwrap_or_default());
-    window.set_can_connect(view.can_connect);
+    // Connecting is also possible while the service is unreachable, if connecting starts it first.
+    window.set_can_connect(view.can_connect || view.start_on_connect);
+    window.set_start_button_visible(view.start_button != StartButton::Hidden);
+    window.set_start_button_busy(view.start_button == StartButton::Busy);
+    window.set_fix_rule_visible(view.fix_rule);
+    window.set_guide_link_visible(view.guide_link);
     window.set_connecting(view.connecting);
     window.set_can_disconnect(view.can_disconnect);
     window.set_can_switch(view.can_switch);
@@ -1015,6 +2177,10 @@ fn ask(shared: &Shared, awaiting: Awaiting, title: Phrase, text: Phrase, ok_labe
     lock(&shared.settings).awaiting = Some(awaiting);
     SHOWN.with(|shown| shown.borrow_mut().confirm = Some((title, text, ok_label)));
     if let Some(window) = shared.window.upgrade() {
+        // A question started from the menu must be seen: bring a hidden or minimised window back first.
+        if !window.window().is_visible() || window.window().is_minimized() {
+            bring_window_back(shared);
+        }
         show_confirm(&window);
     }
 }
@@ -1045,8 +2211,20 @@ fn close_confirm(shared: &Shared) -> Option<Awaiting> {
     lock(&shared.settings).awaiting.take()
 }
 
+/// Builds the menu anew once the running callback has released its locks (the setting "Kill switch" decides
+/// whether the menu offers "Block internet").
+fn refresh_tray_menu_later(shared: &Shared) {
+    let shared = shared.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(window) = shared.window.upgrade() {
+            show_tray_menu(&window, &shared);
+        }
+    });
+}
+
 /// Checks a change and saves it.
 fn handle_edit(shared: &Shared, edit: Edit) {
+    refresh_tray_menu_later(shared);
     let Some(window) = shared.window.upgrade() else { return };
     let mut store = lock(&shared.settings);
     let known: Vec<String> = store.categories.iter().map(|category| category.name.clone()).collect();
@@ -1166,6 +2344,7 @@ fn connect_settings(window: &MainWindow, shared: &Shared) {
     });
     let confirm = shared.clone();
     window.on_confirm_ok(move || {
+        refresh_tray_menu_later(&confirm);
         let Some(window) = confirm.window.upgrade() else { return };
         match close_confirm(&confirm) {
             Some(Awaiting::Settings(new, kept)) => {
@@ -1179,7 +2358,7 @@ fn connect_settings(window: &MainWindow, shared: &Shared) {
                 }
                 store_settings(&window, &mut store, new, &gate);
             }
-            Some(Awaiting::Connect(host)) => begin_connect(&confirm, host, true),
+            Some(Awaiting::Connect(pick)) => begin_connect(&confirm, pick, true),
             None => {}
         }
     });
@@ -1400,23 +2579,31 @@ fn refresh_texts(window: &MainWindow, shared: &Shared) {
     let monitor = lock(&shared.monitor);
     let view = monitor.view();
     let connected = matches!(monitor.display(), Some(DisplayState::Connected { .. }));
+    let state_color = look::state_color(monitor.display());
     show(
         window,
         &view,
         look::tone(monitor.display()).as_str(),
         look::main_button(monitor.display(), &view),
+        state_color,
+        &lock(&shared.countries),
     );
     drop(monitor);
-    show_fixed_texts(window);
-    {
-        let countries = lock(&shared.countries);
-        show_servers(window, &countries, &window.get_search_text());
-        show_location(window, &countries);
+    // "Best location" stays selected under its name in the new language.
+    if best::is_best(&window.get_selected_host()) {
+        window.set_selected_host(best::BEST.into());
+        window.set_selected_name(tk(Key::BestName));
     }
-    show_streaming(window, &lock(&shared.streaming), &window.get_search_text());
+    show_state_icon(shared, window, &view, state_color);
+    show_fixed_texts(window);
+    show_lists(window, shared);
+    show_location(window, &lock(&shared.countries));
     show_settings(window, &lock(&shared.settings), connected);
     show_close_dialog(window);
     show_confirm(window);
+    window.set_about_version(about::version_text(i18n::current()).into());
+    show_autostart(window);
+    show_update(window);
     SHOWN.with(|shown| {
         let shown = shown.borrow();
         if let Some(toast) = &shown.toast {
@@ -1482,6 +2669,187 @@ fn connect_donation(window: &MainWindow, shared: &Shared) {
             start_donation(&click);
         }
     });
+    // "Project page" in "About Celata".
+    let project = shared.clone();
+    window.on_open_project(move || open_link(&project, about::PROJECT_URL, Key::DonationBlockedNotice));
+}
+
+/// Sets the stored appearance (light or dark) before the window is shown, also for the hidden start and for
+/// bringing the window back later, and saves the choice of the button in the header. The window holds the
+/// appearance itself (`set-appearance` is the only place that sets it); Rust never reads it back. Saving only:
+/// no service, no network, no reconnect. If saving fails, the appearance stays for this session and the usual
+/// notice about the file appears.
+fn connect_appearance(window: &MainWindow, shared: &Shared) {
+    window.invoke_set_appearance(lock(&shared.settings).app.appearance.is_dark());
+    let toggled = shared.clone();
+    window.on_appearance_toggled(move |dark| {
+        save_app(&toggled, |app| {
+            app.appearance = if dark { Appearance::Dark } else { Appearance::Light };
+        });
+    });
+}
+
+/// Saves a switch of Celata itself at once, like "Show donation hint": no validation, no question, nothing to
+/// the service, no reconnect. The display follows the switch even if saving fails.
+fn save_app(shared: &Shared, change: impl FnOnce(&mut AppSettings)) {
+    let Some(window) = shared.window.upgrade() else { return };
+    let mut store = lock(&shared.settings);
+    change(&mut store.app);
+    if let Some(path) = &store.settings_path {
+        match settings::save(path, &store.current, &store.kept, &store.app) {
+            Ok(()) => set_file_notice(&window, None),
+            Err(error) => set_file_notice(&window, Some(save_failed(&error))),
+        }
+    }
+}
+
+/// Connects the section "Application": notifications, running in the background, start at login.
+fn connect_application(window: &MainWindow, shared: &Shared) {
+    {
+        let store = lock(&shared.settings);
+        window.set_notifications(store.app.notifications);
+        window.set_keep_running(store.app.keep_running);
+        window.set_update_check(store.app.update_check);
+    }
+    // An own entry for the start at login follows a moved program; errors go to the terminal only.
+    if let (Ok(exe), Some(home)) = (desktop::program_path(), autostart::config_home())
+        && let Err(error) = autostart::refresh(&exe, &home)
+    {
+        report(Phrase::raw(error.to_string()));
+    }
+    show_autostart(window);
+    let toggle = shared.clone();
+    window.on_update_check_toggled(move |on| {
+        save_app(&toggle, |app| app.update_check = on);
+        if let Some(window) = toggle.window.upgrade() {
+            window.set_update_check(on);
+        }
+        // Switched on: check at once. Switched off: no further request; a hint already shown stays.
+        if on {
+            UPDATE.with(|schedule| schedule.borrow_mut().enable());
+            check_update(&toggle);
+        }
+    });
+    let releases = shared.clone();
+    window.on_open_update(move || open_link(&releases, update::RELEASES_URL, Key::UpdateBlockedNotice));
+    let toggle = shared.clone();
+    window.on_notifications_toggled(move |on| {
+        save_app(&toggle, |app| app.notifications = on);
+        if let Some(window) = toggle.window.upgrade() {
+            window.set_notifications(on);
+        }
+    });
+    let toggle = shared.clone();
+    window.on_keep_running_toggled(move |on| {
+        save_app(&toggle, |app| app.keep_running = on);
+        if let Some(window) = toggle.window.upgrade() {
+            window.set_keep_running(on);
+        }
+    });
+    let toggle = shared.clone();
+    window.on_autostart_toggled(move |on| {
+        let changed = match (desktop::program_path(), autostart::config_home()) {
+            (Ok(exe), Some(home)) if on => autostart::enable(&exe, &home),
+            (_, Some(home)) if !on => autostart::disable(&home),
+            _ => Err(std::io::Error::other("no configuration directory")),
+        };
+        if changed.is_err() {
+            show_toast(&toggle, Phrase::key(Key::SettingsAutostartFailed), true);
+        }
+        // The switch shows what the entry really is now.
+        if let Some(window) = toggle.window.upgrade() {
+            show_autostart(&window);
+        }
+    });
+}
+
+thread_local! {
+    /// When the next check for a new version is due and which version was found; only for this session.
+    static UPDATE: RefCell<update::Schedule> = RefCell::default();
+}
+
+/// Asks GitHub for a newer version when the switch is on and a check is due: at start, once the first state of
+/// the service is known, then once a day. Never while the internet is blocked or the routes cannot be read;
+/// such a check is left out until the next one is due.
+fn check_update(shared: &Shared) {
+    if !lock(&shared.settings).app.update_check {
+        return;
+    }
+    let Some(display) = lock(&shared.monitor).display().cloned() else {
+        return;
+    };
+    let now = Instant::now();
+    let due = UPDATE.with(|schedule| {
+        let mut schedule = schedule.borrow_mut();
+        let due = schedule.due(now);
+        if due {
+            schedule.done(now);
+        }
+        due
+    });
+    if !due || !update::may_check(Some(&display), &killswitch::is_blocked()) {
+        return;
+    }
+    let found = shared.clone();
+    spawn("update", move || {
+        // The routes are read once more right before the request.
+        let Some(version) = update::fetch_latest(killswitch::is_blocked) else {
+            return;
+        };
+        let _ = slint::invoke_from_event_loop(move || {
+            if UPDATE.with(|schedule| schedule.borrow_mut().record(version))
+                && let Some(window) = found.window.upgrade()
+            {
+                show_update(&window);
+                show_tray_menu(&window, &found);
+            }
+        });
+    });
+}
+
+/// The hint in the overview in the language in force; empty without a newer version.
+fn show_update(window: &MainWindow) {
+    let text = UPDATE.with(|schedule| {
+        schedule.borrow().shown().map(|version| {
+            i18n::fill(
+                i18n::text(i18n::current(), Key::UpdateAvailable),
+                &[version.to_string()],
+            )
+        })
+    });
+    window.set_update_text(text.unwrap_or_default().into());
+}
+
+/// Shows the state of the entry for the start at login: the file itself is the state of the switch.
+fn show_autostart(window: &MainWindow) {
+    let Some(home) = autostart::config_home() else {
+        window.set_autostart(false);
+        window.set_autostart_foreign(false);
+        window.set_autostart_note(SharedString::new());
+        return;
+    };
+    let state = autostart::current(&home).unwrap_or(AutostartState::Off);
+    window.set_autostart(state == AutostartState::On);
+    window.set_autostart_foreign(state == AutostartState::Foreign);
+    let note = if state == AutostartState::Foreign {
+        tr(&Phrase::fill(
+            Key::SettingsAutostartForeign,
+            [Phrase::raw(home_relative(&autostart::path(&home)))],
+        ))
+    } else {
+        SharedString::new()
+    };
+    window.set_autostart_note(note);
+}
+
+/// A path below the home directory as `~/…`, otherwise as it is.
+fn home_relative(path: &Path) -> String {
+    match std::env::var_os("HOME").map(PathBuf::from) {
+        Some(home) if path.starts_with(&home) && home.is_absolute() => {
+            format!("~/{}", path.strip_prefix(&home).unwrap_or(path).display())
+        }
+        _ => path.display().to_string(),
+    }
 }
 
 /// Opens the Ko-fi page in the default browser, in a thread of its own, so that the window never waits

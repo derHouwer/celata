@@ -1,10 +1,14 @@
 # Manual setup
 
-This page describes how to set up Celata **without a package**: building it from source and installing the
-service unit and the group by hand.
+This page describes how to set up Celata **without a package**: building it from source and installing by hand
+the service unit, the group and the rule that lets Celata start the service.
 
 If there is a package for your distribution, use it instead. It does all of this for you; see "Install" in
-the [README](../README.md).
+the [README](../README.md). The setup script `celata-setup.sh` installs the package and does the steps around
+it.
+
+The setup by hand stays for systems without a package and for developers. The setup script recognizes a
+setup made by hand and does not change it; with `bash celata-setup.sh --check` you can see what it finds.
 
 The setup is needed once and requires administrator rights (`sudo`). None of the commands changes your VPN
 connection or your network: the hide.me service only connects when Celata tells it to.
@@ -73,7 +77,48 @@ sudo install -m 0644 packaging/arch/celata-hide.me.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
-## 4. Start the service
+## 4. Let Celata start the service
+
+(This is also the one step to do when you update a setup by hand from version 0.8.1: version 0.8.1 did not have the
+rule.)
+
+A rule for polkit lets members of the group `celata` start this one service without a password, in a session
+directly at this computer. Nothing else: stopping, restarting, enabling or disabling it still needs `sudo`.
+With the rule Celata starts the service by itself when it is not running, at every start of Celata and when you
+connect after the service was stopped. Celata never connects by itself.
+
+```bash
+sudo install -m 0644 packaging/polkit/49-celata.rules /etc/polkit-1/rules.d/49-celata.rules
+```
+
+Or, from any directory, with the rule built into Celata:
+
+```bash
+celata --polkit-rule | sudo tee /etc/polkit-1/rules.d/49-celata.rules >/dev/null
+```
+
+Check that it works. The service must be stopped first; the second command then starts it without a password:
+
+```bash
+sudo systemctl stop celata-hide.me.service
+systemctl --no-ask-password start celata-hide.me.service
+```
+
+No output means the rule works. "Interactive authentication required." means it does not: check the group
+(step 2, log out and back in) and that you are logged in at this computer, not over the network.
+
+To remove the rule again:
+
+```bash
+sudo rm /etc/polkit-1/rules.d/49-celata.rules
+```
+
+Without the rule Celata shows the button "Start service", which asks for the administrator password, and the
+command for the rule.
+
+## 5. Start the service by hand (only without the rule)
+
+With the rule from step 4 you can skip this step. Without it, start the service yourself:
 
 ```bash
 sudo systemctl start celata-hide.me.service
@@ -89,7 +134,7 @@ sudo systemctl enable --now celata-hide.me.service
 Either way the service only waits for Celata. It never connects on its own. To undo the second command:
 `sudo systemctl disable --now celata-hide.me.service`.
 
-## 5. Check the result
+## 6. Check the result
 
 ```bash
 ls -l /run/hide.me/control.sock
@@ -97,7 +142,7 @@ ls -l /run/hide.me/control.sock
 
 The line must start with `srw-rw----` and name `root celata`.
 
-## 6. Start Celata
+## 7. Start Celata
 
 ```bash
 celata
@@ -115,10 +160,14 @@ This also ends a running connection and lifts an internet block:
 sudo systemctl stop celata-hide.me.service
 ```
 
+With the rule from step 4, Celata starts the service again when you connect the next time, or when Celata
+starts. To keep the service off, quit Celata first.
+
 ## Removing the setup
 
 ```bash
 sudo systemctl disable --now celata-hide.me.service
+sudo rm -f /etc/polkit-1/rules.d/49-celata.rules
 sudo rm /etc/systemd/system/celata-hide.me.service
 sudo systemctl daemon-reload
 sudo gpasswd -d "$USER" celata

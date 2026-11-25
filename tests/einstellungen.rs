@@ -673,3 +673,226 @@ fn sprachwahl_aendert_nichts_am_auftrag_an_den_dienst() {
         "Mit Deutsch und Englisch bekommt der Dienst genau dasselbe"
     );
 }
+
+// --- Favourites (feature 012) ---
+
+#[test]
+fn favoriten_gehen_nie_an_den_dienst() {
+    let favorite = "frankfurt1.hideservers.net";
+    let path = settings_file(&format!(
+        r#"{{"version":1,"settings":{{"split_tunnel":["192.168.1.0/24"]}},"app":{{"favorites":["{favorite}","streaming-jp.hideservers.net"]}}}}"#
+    ));
+    let loaded = celata::settings::load(Some(&path));
+    assert_eq!(loaded.notice, None);
+    assert_eq!(loaded.app.favorites.len(), 2);
+    for body in [
+        celata::settings::to_service_json(&loaded.settings, NL),
+        celata::settings::to_service_json_without_host(&loaded.settings),
+    ] {
+        assert!(!body.contains("frankfurt1") && !body.contains("streaming-jp"), "{body}");
+        assert!(!body.contains("favorites"), "{body}");
+    }
+    let daemon = daemon("0.9.14", 0);
+    let target = Target::new(NL, loaded.settings);
+    assert_eq!(
+        run_connect(&client(&daemon), &mut fresh_ledger(), &target, true, false),
+        ConnectResult::Connected
+    );
+    for body in daemon.bodies() {
+        assert!(!body.contains("frankfurt1") && !body.contains("favorites"), "{body}");
+    }
+    assert_nothing_forbidden(&daemon);
+}
+
+/// Feature 013: the favourite "Best location" and the hosts among the favourites never reach the service, and
+/// the stored form keeps the mark unchanged.
+#[test]
+fn bester_standort_als_favorit_geht_nie_an_den_dienst() {
+    let path = settings_file(
+        r#"{"version":1,"settings":{"split_tunnel":["192.168.1.0/24"]},"app":{"favorites":["best","berlin.hideservers.net"]}}"#,
+    );
+    let loaded = celata::settings::load(Some(&path));
+    assert_eq!(loaded.notice, None);
+    assert_eq!(loaded.app.favorites, ["best", "berlin.hideservers.net"]);
+    for body in [
+        celata::settings::to_service_json(&loaded.settings, NL),
+        celata::settings::to_service_json_without_host(&loaded.settings),
+    ] {
+        assert!(!body.contains("best") && !body.contains("berlin"), "{body}");
+        assert!(!body.contains("favorites"), "{body}");
+    }
+    let defaults = celata::settings::Settings::default();
+    for field in celata::settings::changed_fields(&defaults, &loaded.settings) {
+        let name = format!("{field:?}").to_lowercase();
+        assert!(!name.contains("best") && !name.contains("favorit"), "{name}");
+    }
+    // Saved and read again: the mark stays as it is.
+    celata::settings::save(&path, &loaded.settings, &loaded.kept, &loaded.app).unwrap();
+    let again = celata::settings::load(Some(&path));
+    assert_eq!(again.app.favorites, ["best", "berlin.hideservers.net"]);
+    let stored = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        stored.contains(r#"["best","berlin.hideservers.net"]"#) || stored.contains("\"best\""),
+        "{stored}"
+    );
+    let daemon = daemon("0.9.14", 0);
+    let target = Target::new(NL, again.settings);
+    assert_eq!(
+        run_connect(&client(&daemon), &mut fresh_ledger(), &target, true, false),
+        ConnectResult::Connected
+    );
+    for body in daemon.bodies() {
+        assert!(!body.contains("\"best\"") && !body.contains("berlin"), "{body}");
+    }
+    assert_nothing_forbidden(&daemon);
+}
+
+/// Setting a star saves at once, but leaves the settings of the service untouched: nothing to apply, no
+/// reconnect.
+#[test]
+fn stern_aendert_keine_einstellung_des_dienstes() {
+    let path = settings_file(r#"{"version":1,"settings":{"split_tunnel":["192.168.1.0/24"],"port":433}}"#);
+    let loaded = celata::settings::load(Some(&path));
+    let mut app = loaded.app.clone();
+    assert!(celata::favorites::toggle(&mut app.favorites, "de.hideservers.net"));
+    celata::settings::save(&path, &loaded.settings, &loaded.kept, &app).unwrap();
+    let again = celata::settings::load(Some(&path));
+    assert_eq!(again.app.favorites, ["de.hideservers.net"]);
+    assert_eq!(again.settings, loaded.settings);
+    assert!(celata::settings::changed_fields(&loaded.settings, &again.settings).is_empty());
+    assert_eq!(celata::settings::changed_class(&loaded.settings, &again.settings), None);
+}
+
+/// Feature 014: the switches of the section "Application" are Celata's own. They never reach the service, are
+/// no field of its settings and changing them leaves nothing to apply.
+#[test]
+fn schalter_des_bereichs_programm_gehen_nie_an_den_dienst() {
+    let path = settings_file(
+        r#"{"version":1,"settings":{"split_tunnel":["192.168.1.0/24"],"port":433},"app":{"notifications":false,"keep_running":true,"update_check":true}}"#,
+    );
+    let loaded = celata::settings::load(Some(&path));
+    assert_eq!(loaded.notice, None);
+    assert!(!loaded.app.notifications && loaded.app.keep_running && loaded.app.update_check);
+    for body in [
+        celata::settings::to_service_json(&loaded.settings, NL),
+        celata::settings::to_service_json_without_host(&loaded.settings),
+    ] {
+        for name in ["notifications", "keep_running", "update_check", "autostart"] {
+            assert!(!body.contains(name), "{name} in {body}");
+        }
+    }
+    let defaults = celata::settings::Settings::default();
+    for field in celata::settings::changed_fields(&defaults, &loaded.settings) {
+        let name = format!("{field:?}").to_lowercase();
+        for part in ["notif", "keep", "update", "autostart"] {
+            assert!(!name.contains(part), "{name}");
+        }
+    }
+    // Reset all keeps the switches; they are no part of it.
+    let (settings, kept) = celata::settings::reset_all(&loaded.settings, &loaded.kept).unwrap();
+    celata::settings::save(&path, &settings, &kept, &loaded.app).unwrap();
+    let again = celata::settings::load(Some(&path));
+    assert_eq!(again.app, loaded.app);
+    // Changing a switch saves at once, but changes no setting of the service: nothing to apply, no reconnect.
+    let mut app = again.app.clone();
+    app.keep_running = false;
+    app.notifications = true;
+    app.update_check = false;
+    celata::settings::save(&path, &again.settings, &again.kept, &app).unwrap();
+    let after = celata::settings::load(Some(&path));
+    assert_eq!(after.app, app);
+    assert!(celata::settings::changed_fields(&again.settings, &after.settings).is_empty());
+    assert_eq!(celata::settings::changed_class(&again.settings, &after.settings), None);
+    let daemon = daemon("0.9.14", 0);
+    let target = Target::new(NL, after.settings);
+    assert_eq!(
+        run_connect(&client(&daemon), &mut fresh_ledger(), &target, true, false),
+        ConnectResult::Connected
+    );
+    for body in daemon.bodies() {
+        assert!(
+            !body.contains("keep_running") && !body.contains("notifications"),
+            "{body}"
+        );
+    }
+    assert_nothing_forbidden(&daemon);
+}
+
+/// The settings file that version 0.8.1 wrote (`tests/fixtures/einstellungen-0.8.1.json`, made with the save
+/// function of that version and values that differ from the defaults) is read as it stands. What the file does not
+/// know has its default, and saving it again changes none of the old values.
+#[test]
+fn die_einstellungsdatei_von_0_8_1_wird_unveraendert_gelesen() {
+    use celata::i18n::Language;
+    use celata::settings::{self, AppSettings, Appearance, FILTERS_WORK, IpVersion};
+
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/einstellungen-0.8.1.json");
+    let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(&fixture).unwrap()).unwrap();
+    assert_eq!(stored["version"], 1, "the file is of format 1");
+
+    let loaded = settings::load(Some(&fixture));
+    assert_eq!(loaded.notice, None, "the file is accepted without a notice");
+
+    // The values of the service, exactly as in the file.
+    let expected = &loaded.settings;
+    assert!(!expected.use_doh);
+    assert_eq!(expected.plain_dns, ["192.0.2.53:53", "[2001:db8::53]:53"]);
+    assert_eq!(expected.split_tunnel, ["192.0.2.0/24", "2001:db8:1::/48"]);
+    assert!(expected.port_forward);
+    assert!(!expected.kill_switch);
+    assert_eq!(expected.ip_version, IpVersion::V4Only);
+    assert_eq!(
+        (
+            expected.port,
+            expected.dpd_secs,
+            expected.rest_timeout_secs,
+            expected.reconnect_wait_secs
+        ),
+        (4430, 45, 60, 20)
+    );
+    // The held-back selection of the filters stays in the file; it counts only when the filters work.
+    let stored_filter: Filter = serde_json::from_value(stored["settings"]["filter"].clone()).unwrap();
+    assert!(stored_filter.ads && stored_filter.force_dns && stored_filter.pg == 12);
+    if FILTERS_WORK {
+        assert_eq!(loaded.settings.filter, stored_filter);
+    } else {
+        assert_eq!(loaded.settings.filter, Filter::default());
+        assert_eq!(loaded.kept, stored_filter);
+    }
+
+    // Celata's own switches: the two of 0.8.1 as stored, all newer ones with their default.
+    assert_eq!(
+        loaded.app,
+        AppSettings {
+            donation_hint: false,
+            language: Language::De,
+            ..AppSettings::default()
+        }
+    );
+    assert_eq!(loaded.app.appearance, Appearance::Light);
+    assert!(loaded.app.favorites.is_empty());
+    assert!(loaded.app.notifications, "notifications are on by default");
+    assert!(!loaded.app.keep_running, "keeping Celata running is off by default");
+    assert!(!loaded.app.update_check, "the check for new versions is off by default");
+
+    // Saving it again keeps the format and every old value.
+    let directory = std::env::temp_dir().join(format!("celata-einstellungen-0-8-1-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("einstellungen.json");
+    settings::save(&path, &loaded.settings, &loaded.kept, &loaded.app).unwrap();
+    let again: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(again["version"], 1);
+    assert_eq!(
+        again["settings"], stored["settings"],
+        "no old value of the service changes"
+    );
+    assert_eq!(again["app"]["donation_hint"], stored["app"]["donation_hint"]);
+    assert_eq!(again["app"]["language"], stored["app"]["language"]);
+    let reloaded = settings::load(Some(&path));
+    assert_eq!(
+        (reloaded.settings, reloaded.kept, reloaded.app, reloaded.notice),
+        (loaded.settings, loaded.kept, loaded.app, None)
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}

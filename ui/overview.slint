@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 derHouwer
 
-// View "Overview": status card, location, main button.
+// View "Overview": status card, location, main button, "Connection" and "Favorite locations".
 // There is only the one main button; its right, red area blocks the internet or lifts the block.
 // The colour of the dot and the text and effect of the main button come finished from `src/look.rs`.
 
 import { Theme } from "theme.slint";
-import { Card, CommandBox, Flag, MainButton, SecondaryButton, StatusDot } from "widgets.slint";
+import { ListView } from "std-widgets.slint";
+import { BestIcon, Card, CommandBox, Flag, MainButton, SecondaryButton, StatusDot, Star } from "widgets.slint";
 
 // Permanent hint about settings that reduce the protection
 export struct HintRow {
@@ -32,11 +33,32 @@ export struct DetailsRow {
     public-blocked: bool,
 }
 
-// A figure: small label, the value below it
+// A row of "Favorite locations" from `src/look.rs` (`FavoriteItem`), the flag from the image cache.
+export struct FavoriteItem {
+    flag: image,
+    // "Germany, Frankfurt #1", only the country for a streaming server (the play symbol says the rest), or the
+    // host name
+    label: string,
+    // Host for connecting; empty: cannot be selected
+    host: string,
+    // Host the star switches (also when not available)
+    star-host: string,
+    // "available", "missing" or "loading"
+    state: string,
+    streaming: bool,
+    connected: bool,
+    // Text for the selected location ("Streaming, Japan" for a streaming server)
+    choice: string,
+    // "Best location": the Celata logo instead of the flag; host and star-host are "best"
+    best: bool,
+}
+
+// A figure: small label, the value below it; "–" without a value
 component Figure inherits VerticalLayout {
     in property <string> label;
     in property <string> value;
     spacing: 2px;
+    horizontal-stretch: 1;
 
     Text {
         text: root.label;
@@ -45,25 +67,69 @@ component Figure inherits VerticalLayout {
     }
 
     Text {
-        text: root.value;
-        font-size: 15px;
+        // "–" is no text to translate.
+        text: root.value == "" ? "–" : root.value;
+        font-size: 14px;
         font-weight: 600;
         color: Theme.text;
     }
 }
 
-// Cell of the address table
-component Cell inherits Text {
-    font-size: 13px;
-    color: Theme.text;
-    wrap: word-wrap;
-    horizontal-stretch: 1;
-}
-
-// Header or row label of the address table
+// Label of a group in "Connection" and of the lines "IPv4"/"IPv6"
 component Label inherits Text {
     font-size: 12px;
     color: Theme.text-soft;
+}
+
+// A group of addresses: label above, below one line each for IPv4 and IPv6. The values are never wrapped and
+// never cut; "Connection" is wide enough for the longest IPv6 address (`OverviewView`, `ip-measure`).
+component AddressGroup inherits VerticalLayout {
+    in property <string> label;
+    in property <string> v4;
+    in property <string> v6;
+    // Public address: bold
+    in property <bool> strong;
+    // Internet blocked: red text instead of the addresses
+    in property <bool> alert;
+    spacing: 2px;
+
+    Label {
+        text: root.label;
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        Label {
+            text: "IPv4";
+            width: 36px;
+        }
+
+        Text {
+            text: root.v4 == "" ? "–" : root.v4;
+            font-size: 13px;
+            font-weight: root.strong ? 600 : 400;
+            color: root.alert ? Theme.alert-fg : Theme.text;
+            horizontal-stretch: 1;
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        Label {
+            text: "IPv6";
+            width: 36px;
+        }
+
+        Text {
+            text: root.v6 == "" ? "–" : root.v6;
+            font-size: 13px;
+            font-weight: root.strong ? 600 : 400;
+            color: root.alert ? Theme.alert-fg : Theme.text;
+            horizontal-stretch: 1;
+        }
+    }
 }
 
 export component OverviewView inherits VerticalLayout {
@@ -78,11 +144,20 @@ export component OverviewView inherits VerticalLayout {
     in property <string> tone;
     in property <bool> switching;
     in property <bool> can-disconnect;
-    in property <string> selected-host;
+    in-out property <string> selected-host;
+    in-out property <string> selected-name;
+    in property <bool> can-connect;
+    // While connected: switching to a server other than the connected one is possible
+    in property <bool> can-switch;
+    in property <string> connected-host;
+    // Favourites of both tabs, newest first
+    in property <[FavoriteItem]> favorites;
     in property <string> main-label;
     in property <string> main-action;
     in property <string> location-label;
     in property <image> location-flag;
+    // "Best location": the Celata logo instead of the flag
+    in property <bool> location-best;
     in property <[HintRow]> hints;
     in property <DetailsRow> details;
     // Right area of the main button from `src/look.rs`: "route", "unblock" or "none"
@@ -90,6 +165,8 @@ export component OverviewView inherits VerticalLayout {
     in property <string> main-side-label;
     // False only for "route" with the kill switch switched off; `route-hint` then explains why.
     in property <bool> side-available;
+    // Colour of the connection state for the main button: "normal", "connected" or "blocked"
+    in property <string> state-color: "normal";
     in property <string> route-hint;
 
     callback unblock-request();
@@ -97,6 +174,21 @@ export component OverviewView inherits VerticalLayout {
     callback disconnect();
     callback open-locations();
     callback route-request();
+    callback toggle-favorite(string);
+    callback selection-changed(string);
+    // "Celata 0.9.0 is available" from Rust; empty: no hint (the check is off or found nothing newer).
+    in property <string> update-text;
+    // "Releases": Rust opens the fixed page with `xdg-open`.
+    callback open-update();
+    // Start of the service, from `StatusView` in `src/state.rs`: button "Start service" (disabled while the
+    // password prompt is open), section "Fix permanently" with its command, link to the setup guide.
+    in property <bool> start-button-visible;
+    in property <bool> start-button-busy;
+    in property <bool> fix-rule-visible;
+    in property <string> fix-rule-command;
+    in property <bool> guide-link-visible;
+    callback start-service-clicked();
+    callback setup-guide-clicked();
 
     spacing: 16px;
     alignment: start;
@@ -112,7 +204,7 @@ export component OverviewView inherits VerticalLayout {
     Card {
         background: root.warning ? Theme.card-warning : Theme.card;
         border-width: root.warning ? 2px : 1px;
-        border-color: root.warning ? Theme.tone-alert : Theme.card-border;
+        border-color: root.warning ? Theme.alert-fg : Theme.card-border;
 
         VerticalLayout {
             padding: 20px;
@@ -133,7 +225,7 @@ export component OverviewView inherits VerticalLayout {
                     text: root.status-title;
                     font-size: Theme.status-title;
                     font-weight: 600;
-                    color: root.warning ? Theme.tone-alert : Theme.text;
+                    color: root.warning ? Theme.alert-fg : Theme.text;
                     vertical-alignment: center;
                     wrap: word-wrap;
                     accessible-role: text;
@@ -147,23 +239,96 @@ export component OverviewView inherits VerticalLayout {
                 wrap: word-wrap;
             }
 
-            Text {
-                text: root.status-text;
-                wrap: word-wrap;
-                font-size: 14px;
-                color: Theme.text;
-            }
+            // Text, message, command, button "Start service", "Fix permanently" and the link to the setup guide in one
+            // block without spacing of its own: every part brings its distance to the part above, so that hidden parts
+            // leave no gap. The new parts are shown and hidden with `visible`/`height`, not with `if`: wrapping texts in
+            // an `if` block are measured as one line.
+            VerticalLayout {
+                spacing: 0px;
 
-            if root.notice != "": Text {
-                text: root.notice;
-                wrap: word-wrap;
-                font-size: 14px;
-                font-weight: 600;
-                color: Theme.text;
-            }
+                Text {
+                    text: root.status-text;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    color: Theme.text;
+                }
 
-            if root.command != "": CommandBox {
-                command: root.command;
+                if root.notice != "": VerticalLayout {
+                    padding-top: 8px;
+                    Text {
+                        text: root.notice;
+                        wrap: word-wrap;
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+                }
+
+                if root.command != "": VerticalLayout {
+                    padding-top: 8px;
+                    CommandBox {
+                        command: root.command;
+                    }
+                }
+
+                VerticalLayout {
+                    visible: root.start-button-visible;
+                    height: root.start-button-visible ? self.preferred-height : 0px;
+                    padding-top: 12px;
+
+                    HorizontalLayout {
+                        alignment: start;
+                        SecondaryButton {
+                            text: @tr("Start service");
+                            enabled: !root.start-button-busy;
+                            clicked => {
+                                root.start-service-clicked();
+                            }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    visible: root.fix-rule-visible;
+                    height: root.fix-rule-visible ? self.preferred-height : 0px;
+                    padding-top: 16px;
+                    spacing: 6px;
+
+                    Text {
+                        text: @tr("Fix permanently");
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: @tr("Run this command once in a terminal. Afterwards Celata starts the service by itself, without a password. The rule only applies in a session directly at this computer.");
+                        font-size: 14px;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+
+                    CommandBox {
+                        command: root.fix-rule-command;
+                    }
+                }
+
+                VerticalLayout {
+                    visible: root.guide-link-visible;
+                    height: root.guide-link-visible ? self.preferred-height : 0px;
+                    padding-top: 12px;
+
+                    HorizontalLayout {
+                        alignment: start;
+                        SecondaryButton {
+                            text: @tr("Setup guide");
+                            clicked => {
+                                root.setup-guide-clicked();
+                            }
+                        }
+                    }
+                }
             }
 
             if root.detail != "": Text {
@@ -189,7 +354,7 @@ export component OverviewView inherits VerticalLayout {
                     width: 12px;
                     font-size: 14px;
                     font-weight: 700;
-                    color: hint.alert ? Theme.tone-alert : Theme.text-soft;
+                    color: hint.alert ? Theme.alert-fg : Theme.text-soft;
                     accessible-role: none;
                 }
 
@@ -198,8 +363,43 @@ export component OverviewView inherits VerticalLayout {
                     horizontal-stretch: 1;
                     font-size: 13px;
                     font-weight: hint.alert ? 600 : 400;
-                    color: hint.alert ? Theme.tone-alert : Theme.text-soft;
+                    color: hint.alert ? Theme.alert-fg : Theme.text-soft;
                     wrap: word-wrap;
+                }
+            }
+        }
+    }
+
+    // --- Hint about a new version ---
+    // One short line that does not wrap, therefore in an `if` block.
+    if root.update-text != "": Card {
+        HorizontalLayout {
+            padding: 14px;
+            spacing: 8px;
+
+            Text {
+                text: "•";
+                width: 12px;
+                font-size: 14px;
+                font-weight: 700;
+                color: Theme.accent-fg;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+
+            Text {
+                text: root.update-text;
+                horizontal-stretch: 1;
+                font-size: 13px;
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+
+            SecondaryButton {
+                text: @tr("Releases");
+                clicked => {
+                    root.open-update();
                 }
             }
         }
@@ -210,7 +410,7 @@ export component OverviewView inherits VerticalLayout {
         min-height: 64px;
         background: location-touch.has-hover ? Theme.button-hover : Theme.card;
         accessible-role: button;
-        accessible-label: root.location-label == "" ? @tr("Choose location") : @tr("Location: {}", root.location-label);
+        accessible-label: @tr("Location: {}", root.location-label);
         accessible-action-default => {
             root.open-locations();
         }
@@ -231,8 +431,18 @@ export component OverviewView inherits VerticalLayout {
 
                 VerticalLayout {
                     alignment: center;
-                    Flag {
-                        source: root.location-flag;
+                    // Flag or logo in the same place; both stay out of the layout's way through `visible`.
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        Flag {
+                            y: 3px;
+                            source: root.location-flag;
+                            visible: !root.location-best;
+                        }
+                        BestIcon {
+                            visible: root.location-best;
+                        }
                     }
                 }
 
@@ -247,11 +457,10 @@ export component OverviewView inherits VerticalLayout {
                     }
 
                     Text {
-                        text: root.location-label == "" ? @tr("Choose location") : root.location-label;
+                        text: root.location-label;
                         font-size: Theme.country;
                         font-weight: 600;
-                        color: root.location-label != "" ? Theme.text
-                            : location-touch.has-hover ? Theme.button-hover-text : Theme.accent;
+                        color: Theme.text;
                         // The full location is shown here, therefore wrap instead of cutting.
                         wrap: word-wrap;
                     }
@@ -289,15 +498,13 @@ export component OverviewView inherits VerticalLayout {
         side: root.main-side;
         side-text: root.main-side-label;
         side-available: root.side-available;
+        state-color: root.state-color;
         clicked => {
             if (root.main-action == "disconnect") {
                 root.disconnect();
             } else if (root.main-action == "connect") {
-                if (root.selected-host == "") {
-                    root.open-locations();
-                } else {
-                    root.connect(root.selected-host);
-                }
+                // An empty selection counts as "Best location"; Rust resolves it.
+                root.connect(root.selected-host);
             }
         }
         side-clicked => {
@@ -328,25 +535,79 @@ export component OverviewView inherits VerticalLayout {
         }
     }
 
-    // --- Connection: figures and addresses arranged by IPv4 and IPv6 ---
-    if root.details.public-v4 != "" || root.details.duration != "" || root.details.public-blocked: Card {
-        VerticalLayout {
-            padding: 16px;
+    // --- Connection and favourite locations ---
+    // Next to each other, "Connection" a little wider; one below the other only if the window is too narrow
+    // for the longest IPv6 address next to "Favorite locations". The rectangle places both cards itself, so
+    // that no conditional block is needed (Slint measures wrapping text in `if` blocks wrongly). "Connection"
+    // is always visible and always the same size, whatever the state.
+    details-area := Rectangle {
+        property <length> gap: 16px;
+        property <length> fav-min: 220px;
+        // Widest value: the longest IPv6 address, plus the column "IPv4"/"IPv6" and the padding
+        property <length> conn-min: max(ip-measure.preferred-width + 36px + 8px, figures-measure.preferred-width)
+            + 2 * 16px;
+        property <length> conn-w: max(self.conn-min, (self.width - self.gap) * 0.55);
+        property <bool> wide: self.width - self.gap - self.conn-w >= self.fav-min;
+        property <length> conn-h: conn-layout.preferred-height;
+        // One below the other: heading and at most 5 rows
+        property <length> fav-h: self.wide ? self.conn-h : fav-title.preferred-height + 5 * 32px + 2 * 16px + 8px;
+        height: self.wide ? self.conn-h : self.conn-h + self.gap + self.fav-h;
+
+        // Invisible comparison texts in the font of the values, so that the width does not depend on the
+        // current value and nothing jumps when data arrives. "d" and "b" are the widest characters of an IPv6
+        // address in Noto Sans Bold (measured 2026-11-19: 8 % wider than digits), so every address fits.
+        ip-measure := Text {
+            visible: false;
+            text: "dddd:dddd:dddd:dddd:dddd:dddd:dddd:dddd";
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        // Widest figures: a long duration ("23 Std. 59 Min.") and two amounts ("999,9 MB"), as digits of
+        // the same width, so that the comparison needs no text to translate.
+        figures-measure := HorizontalLayout {
+            visible: false;
             spacing: 12px;
 
             Text {
-                text: @tr("Connection");
-                font-size: 15px;
+                text: "00000000000000";
+                font-size: 14px;
                 font-weight: 600;
-                color: Theme.text;
             }
 
-            GridLayout {
-                spacing-horizontal: 16px;
-                spacing-vertical: 6px;
+            Text {
+                text: "00000000";
+                font-size: 14px;
+                font-weight: 600;
+            }
 
-                // Figures in the same columns as the addresses
-                if root.details.duration != "": Row {
+            Text {
+                text: "00000000";
+                font-size: 14px;
+                font-weight: 600;
+            }
+        }
+
+        Card {
+            x: 0;
+            y: 0;
+            width: parent.wide ? parent.conn-w : parent.width;
+            height: parent.conn-h;
+
+            conn-layout := VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+
+                Text {
+                    text: @tr("Connection");
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: Theme.text;
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+
                     Figure {
                         label: @tr("Duration");
                         value: root.details.duration;
@@ -363,70 +624,172 @@ export component OverviewView inherits VerticalLayout {
                     }
                 }
 
-                if root.details.duration != "": Row {
-                    Rectangle {
-                        height: 6px;
-                    }
+                AddressGroup {
+                    label: @tr("VPN address");
+                    v4: root.details.address-v4;
+                    v6: root.details.address-v6;
                 }
 
-                Row {
-                    Label {
-                        text: "";
-                        width: 110px;
-                    }
-
-                    Label {
-                        text: "IPv4";
-                    }
-
-                    Label {
-                        text: "IPv6";
-                    }
+                AddressGroup {
+                    label: @tr("DNS servers");
+                    v4: root.details.dns-v4;
+                    v6: root.details.dns-v6;
                 }
 
-                if root.details.duration != "": Row {
-                    Label {
-                        text: @tr("VPN address");
-                    }
+                // Internet blocked: no query, the red notice instead (Celata does not bypass the block).
+                AddressGroup {
+                    label: @tr("Public");
+                    v4: root.details.public-blocked ? @tr("Internet blocked") : root.details.public-v4;
+                    v6: root.details.public-blocked ? @tr("Internet blocked") : root.details.public-v6;
+                    strong: true;
+                    alert: root.details.public-blocked;
+                }
+            }
+        }
 
-                    Cell {
-                        text: root.details.address-v4 == "" ? "–" : root.details.address-v4;
-                    }
+        Card {
+            x: parent.wide ? parent.conn-w + parent.gap : 0;
+            y: parent.wide ? 0 : parent.conn-h + parent.gap;
+            width: parent.wide ? parent.width - parent.conn-w - parent.gap : parent.width;
+            height: parent.fav-h;
 
-                    Cell {
-                        text: root.details.address-v6 == "" ? "–" : root.details.address-v6;
-                    }
+            VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+
+                fav-title := Text {
+                    text: @tr("Favorite locations");
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: Theme.text;
                 }
 
-                if root.details.duration != "": Row {
-                    Label {
-                        text: @tr("DNS servers");
+                // List and hint share the space; only one of them is visible.
+                Rectangle {
+                    vertical-stretch: 1;
+
+                    ListView {
+                        width: parent.width;
+                        height: parent.height;
+                        visible: root.favorites.length > 0;
+
+                        for fav in root.favorites: Rectangle {
+                            property <bool> selectable: fav.host != "";
+                            height: 32px;
+                            background: self.selectable && fav.host == root.selected-host
+                                ? Theme.row-selected
+                                : self.selectable && fav-touch.has-hover ? Theme.row-hover : Theme.card;
+
+                            // The touch area contains the row, so that the star inside it gets its click first.
+                            fav-touch := TouchArea {
+                                enabled: parent.selectable;
+                                clicked => {
+                                    root.selected-host = fav.host;
+                                    root.selected-name = fav.choice;
+                                    root.selection-changed(fav.host);
+                                }
+                                double-clicked => {
+                                    root.selected-host = fav.host;
+                                    root.selected-name = fav.choice;
+                                    root.selection-changed(fav.host);
+                                    if (root.can-connect || (root.can-switch && fav.host != root.connected-host)) {
+                                        root.connect(fav.host);
+                                    }
+                                }
+
+                                // Space on the right for the scroll bar, so that it never covers the star.
+                                HorizontalLayout {
+                                    padding-left: 4px;
+                                    padding-right: 14px;
+                                    spacing: 8px;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        // Flag or logo in the same place, switched through `visible`.
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            Flag {
+                                                y: 3px;
+                                                source: fav.flag;
+                                                visible: !fav.best;
+                                            }
+                                            BestIcon {
+                                                visible: fav.best;
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: fav.label;
+                                        font-size: 13px;
+                                        color: fav.state == "available" ? Theme.text : Theme.text-soft;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide; // may be cut: the full name is shown in the card "Location"
+                                    }
+
+                                    if fav.streaming: VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 0;
+
+                                        // Symbol: lucide-static 1.70.0, icons/play.svg (ISC)
+                                        Image {
+                                            width: 12px;
+                                            height: 12px;
+                                            source: @image-url("icons/play.svg");
+                                            colorize: Theme.text-soft;
+                                            accessible-role: image;
+                                            accessible-label: @tr("Streaming server");
+                                        }
+                                    }
+
+                                    if fav.state != "available": Text {
+                                        text: fav.state == "loading" ? @tr("Loading …") : @tr("not available");
+                                        font-size: 11px;
+                                        color: Theme.text-soft;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 0;
+                                    }
+
+                                    if fav.connected: VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 0;
+
+                                        Rectangle {
+                                            width: 8px;
+                                            height: 8px;
+                                            border-radius: 4px;
+                                            background: Theme.connected-fg;
+                                            accessible-role: text;
+                                            accessible-label: @tr("Connected");
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 0;
+                                        Star {
+                                            size: 16px;
+                                            on: true;
+                                            toggled => {
+                                                root.toggle-favorite(fav.star-host);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
-                    Cell {
-                        text: root.details.dns-v4 == "" ? "–" : root.details.dns-v4;
-                    }
-
-                    Cell {
-                        text: root.details.dns-v6 == "" ? "–" : root.details.dns-v6;
-                    }
-                }
-
-                Row {
-                    Label {
-                        text: @tr("Public");
-                    }
-
-                    Cell {
-                        text: root.details.public-blocked ? @tr("Internet blocked") : root.details.public-v4;
-                        font-weight: 600;
-                        color: root.details.public-blocked ? Theme.tone-alert : Theme.text;
-                    }
-
-                    Cell {
-                        text: root.details.public-blocked ? @tr("Internet blocked") : root.details.public-v6;
-                        font-weight: 600;
-                        color: root.details.public-blocked ? Theme.tone-alert : Theme.text;
+                    Text {
+                        y: 0;
+                        width: parent.width;
+                        visible: root.favorites.length == 0;
+                        text: @tr("No favorites yet. Mark a location with the star under “Locations”.");
+                        wrap: word-wrap;
+                        font-size: 13px;
+                        color: Theme.text-soft;
                     }
                 }
             }

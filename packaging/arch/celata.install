@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 derHouwer
 #
-# Installing never starts or enables the service and adds no user to the group.
+# Installing never starts or enables the service and adds no user to the group. The rule for polkit comes with the
+# package: members of the group may start the service without a password, nothing else.
 
 post_install() {
   echo "Celata needs the hide.me command-line client (AUR: hide-client) and a hide.me account."
-  echo "To use it, add your user to the group and start the service:"
-  echo "  sudo usermod -aG celata \"\$USER\"    (then log out and back in once)"
-  echo "  sudo systemctl start celata-hide.me.service"
+  echo "To use it, add your user to the group, then log out and back in once:"
+  echo "  sudo usermod -aG celata \"\$USER\""
+  echo "Celata starts the service by itself when it needs it."
   echo "See /usr/share/doc/celata/README.md."
 }
 

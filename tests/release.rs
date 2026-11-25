@@ -12,8 +12,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-/// The version is frozen until Celata is published. Remove this guard with the first release after that.
-const FROZEN_VERSION: &str = "0.8.1";
+/// The first published version: the version of Celata never falls below it.
+const FIRST_RELEASE: (u32, u32, u32) = (0, 8, 1);
 const LICENSE_ID: &str = "GPL-3.0-only";
 
 fn root() -> PathBuf {
@@ -52,15 +52,183 @@ fn workspace_version() -> String {
         .expect("Cargo.toml defines version in [workspace.package]")
 }
 
+/// `1.2.3` as three numbers.
+fn parse_version(text: &str) -> (u32, u32, u32) {
+    let numbers: Vec<u32> = text
+        .split('.')
+        .map(|part| part.parse().unwrap_or_else(|_| panic!("{text:?} is not a version")))
+        .collect();
+    match numbers[..] {
+        [major, minor, patch] => (major, minor, patch),
+        _ => panic!("{text:?} is not a version of three numbers"),
+    }
+}
+
+/// The released entries of `CHANGELOG.md`, newest first: `(version, date)` of every line `## [1.2.3] - 2026-01-31`.
+fn released_entries() -> Vec<(String, String)> {
+    read("CHANGELOG.md")
+        .lines()
+        .filter_map(|line| line.strip_prefix("## ["))
+        .filter(|rest| !rest.starts_with("Unreleased"))
+        .map(|rest| {
+            let (version, after) = rest.split_once(']').unwrap_or_else(|| panic!("broken entry: {rest}"));
+            let date = after
+                .strip_prefix(" - ")
+                .unwrap_or_else(|| panic!("entry {version} has no date"));
+            (version.to_owned(), date.trim().to_owned())
+        })
+        .collect()
+}
+
 #[test]
-fn version_is_frozen_until_release() {
-    assert_eq!(
-        workspace_version(),
-        FROZEN_VERSION,
-        "the version stays {FROZEN_VERSION} until Celata is published"
+fn version_never_falls_below_the_first_release() {
+    let version = workspace_version();
+    assert!(
+        parse_version(&version) >= FIRST_RELEASE,
+        "the version {version} is below the first release"
     );
-    assert_eq!(celata::cli::VERSION, FROZEN_VERSION);
-    assert_eq!(celata::cli::version_line(), format!("celata {FROZEN_VERSION}"));
+    assert_eq!(celata::cli::VERSION, version);
+    assert_eq!(celata::cli::version_line(), format!("celata {version}"));
+    // Every release is newer than the one below it in the changelog.
+    let versions: Vec<_> = released_entries()
+        .into_iter()
+        .map(|(version, _)| parse_version(&version))
+        .collect();
+    assert!(!versions.is_empty(), "CHANGELOG.md has no released entry");
+    assert!(
+        versions.windows(2).all(|pair| pair[0] > pair[1]),
+        "the versions in CHANGELOG.md must fall from top to bottom: {versions:?}"
+    );
+}
+
+/// Number of the month for `Jan` .. `Dec`.
+fn month_number(name: &str) -> u32 {
+    const NAMES: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let index = NAMES
+        .iter()
+        .position(|candidate| *candidate == name)
+        .unwrap_or_else(|| panic!("{name:?} is not a month"));
+    u32::try_from(index).expect("twelve months") + 1
+}
+
+/// Weekday of a date as `Sun` .. `Sat` (Sakamoto).
+fn weekday(year: u32, month: u32, day: u32) -> &'static str {
+    const OFFSETS: [u32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    const NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    let year = if month < 3 { year - 1 } else { year };
+    let index = (year + year / 4 - year / 100 + year / 400 + OFFSETS[(month - 1) as usize] + day) % 7;
+    NAMES[index as usize]
+}
+
+/// `(year, month, day)` of `2026-11-25`.
+fn iso_date(text: &str) -> (u32, u32, u32) {
+    let parts: Vec<u32> = text
+        .split('-')
+        .map(|part| part.parse().unwrap_or_else(|_| panic!("{text:?} is not a date")))
+        .collect();
+    match parts[..] {
+        [year, month, day] => (year, month, day),
+        _ => panic!("{text:?} is not a date"),
+    }
+}
+
+/// The date of the top entry of `packaging/debian/changelog` (the line ` -- name <mail>  Wed, 25 Nov 2026 ...`)
+/// as `(year, month, day)`; its weekday must be right.
+fn debian_changelog_date() -> (u32, u32, u32) {
+    let changelog = read("packaging/debian/changelog");
+    let trailer = changelog
+        .lines()
+        .find(|line| line.starts_with(" -- "))
+        .expect("packaging/debian/changelog has an entry");
+    let date = trailer
+        .rsplit_once(">  ")
+        .expect("the trailer has two spaces after the address")
+        .1;
+    let fields: Vec<&str> = date.split_whitespace().collect();
+    let [name, day, month, year, ..] = fields[..] else {
+        panic!("packaging/debian/changelog: broken date {date:?}");
+    };
+    let (day, month, year) = (
+        day.parse().expect("day"),
+        month_number(month),
+        year.parse().expect("year"),
+    );
+    assert_eq!(
+        name,
+        format!("{},", weekday(year, month, day)),
+        "packaging/debian/changelog: the weekday does not fit the date {date:?}"
+    );
+    (year, month, day)
+}
+
+/// The date of the top entry of `%changelog` in `packaging/rpm/celata.spec` (`* Wed Nov 25 2026 name <mail> -
+/// 0.9.0-1`) as `(year, month, day)`, with the version of the entry.
+fn rpm_changelog_date() -> ((u32, u32, u32), String) {
+    let spec = read("packaging/rpm/celata.spec");
+    let entry = spec
+        .lines()
+        .skip_while(|line| *line != "%changelog")
+        .nth(1)
+        .expect("packaging/rpm/celata.spec has a %changelog entry");
+    let fields: Vec<&str> = entry.trim_start_matches("* ").split_whitespace().collect();
+    let [name, month, day, year, ..] = fields[..] else {
+        panic!("packaging/rpm/celata.spec: broken %changelog entry {entry:?}");
+    };
+    let (day, month, year) = (
+        day.parse().expect("day"),
+        month_number(month),
+        year.parse().expect("year"),
+    );
+    assert_eq!(
+        name,
+        weekday(year, month, day),
+        "packaging/rpm/celata.spec: the weekday does not fit the date in {entry:?}"
+    );
+    let version = entry.rsplit_once(" - ").expect("the entry names a version").1;
+    ((year, month, day), version.to_owned())
+}
+
+/// The release date of the newest version stands in four files and is the same in all of them.
+#[test]
+fn release_date_is_the_same_everywhere() {
+    let (version, date) = released_entries()
+        .into_iter()
+        .next()
+        .expect("CHANGELOG.md has a released entry");
+    let expected = iso_date(&date);
+    let metainfo = read("packaging/desktop/io.github.derhouwer.celata.metainfo.xml");
+    let release = metainfo
+        .lines()
+        .find(|line| line.starts_with("    <release "))
+        .expect("the metainfo has a release");
+    assert!(
+        release.contains(&format!("version=\"{version}\"")) && release.contains(&format!("date=\"{date}\"")),
+        "the newest release of the metainfo is not {version} of {date}: {release}"
+    );
+    assert_eq!(debian_changelog_date(), expected, "packaging/debian/changelog");
+    let (rpm_date, rpm_version) = rpm_changelog_date();
+    assert_eq!(rpm_date, expected, "packaging/rpm/celata.spec: %changelog");
+    assert_eq!(
+        rpm_version,
+        format!("{version}-1"),
+        "packaging/rpm/celata.spec: %changelog"
+    );
+    // Once the version stands in the changelog as released, nothing may wait under "Unreleased".
+    if version == workspace_version() {
+        let waiting = read("CHANGELOG.md")
+            .lines()
+            .skip_while(|line| !line.starts_with("## [Unreleased]"))
+            .skip(1)
+            .take_while(|line| !line.starts_with("## ["))
+            .filter(|line| !line.trim().is_empty())
+            .count();
+        assert_eq!(
+            waiting, 0,
+            "CHANGELOG.md has entries under Unreleased for the released version {version}"
+        );
+    }
 }
 
 #[test]
@@ -430,6 +598,11 @@ fn version_is_the_same_everywhere() {
             .nth(1),
         Some(version.as_str())
     );
+    assert_eq!(
+        rpm_changelog_date().1,
+        format!("{version}-1"),
+        "the newest %changelog entry of packaging/rpm/celata.spec is not {version}-1"
+    );
     // One .rpm for every supported Fedora release: no distribution tag in the file name.
     assert!(first_with("packaging/rpm/celata.spec", "Release:").ends_with(" 1"));
     assert_eq!(
@@ -445,9 +618,22 @@ fn version_is_the_same_everywhere() {
         .contains(&format!("version=\"{version}\"")),
         "the newest release in the metainfo is not {version}"
     );
+    // Changes that are not released yet may stand in an "Unreleased" entry above the newest version.
+    let released = read("CHANGELOG.md")
+        .lines()
+        .find(|line| line.starts_with("## [") && !line.starts_with("## [Unreleased]"))
+        .expect("CHANGELOG.md has a released entry")
+        .to_owned();
     assert!(
-        first_with("CHANGELOG.md", "## [").starts_with(&format!("## [{version}]")),
-        "the top entry of CHANGELOG.md is not {version}"
+        released.starts_with(&format!("## [{version}]")),
+        "the top released entry of CHANGELOG.md is not {version}"
+    );
+    // The setup script names the same version as the packages it installs.
+    assert!(
+        read("packaging/setup/celata-setup.sh")
+            .lines()
+            .any(|line| line == format!("CELATA_VERSION={version}")),
+        "packaging/setup/celata-setup.sh does not set CELATA_VERSION={version}"
     );
     for file in [
         "packaging/debian/copyright",
@@ -556,6 +742,18 @@ fn documentation_is_complete() {
             "{path}"
         );
         assert!(readme.contains(&format!("({path})")), "README.md does not show {path}");
+        // Screenshot tools write the position and the title of the window as text chunks; none is published.
+        let mut position = 8;
+        while position + 8 <= data.len() {
+            let length = u32::from_be_bytes(data[position..position + 4].try_into().expect("four bytes")) as usize;
+            let kind = &data[position + 4..position + 8];
+            assert!(
+                ![&b"tEXt"[..], b"iTXt", b"zTXt", b"eXIf", b"tIME"].contains(&kind),
+                "{path} carries a {} chunk",
+                String::from_utf8_lossy(kind)
+            );
+            position += 12 + length;
+        }
     }
     assert!(readme.contains("Unofficial. Not affiliated with, endorsed by, or supported by hide.me."));
     assert!(readme.contains("ABSOLUTELY NO WARRANTY"));
@@ -644,6 +842,90 @@ fn documentation_matches_the_program() {
     );
 }
 
+/// Text of one `##` section of a document, from its heading to the next one.
+fn section(content: &str, heading: &str) -> String {
+    content
+        .lines()
+        .skip_while(|line| *line != heading)
+        .skip(1)
+        .take_while(|line| !line.starts_with("## "))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Readers of version 0.8.1 find out in the README how to update, what they get and what they lose on the way back.
+#[test]
+fn documentation_covers_the_update_from_the_first_release() {
+    let readme = read("README.md");
+    let updating = section(&readme, "## Updating and uninstalling");
+    assert!(
+        updating.lines().any(|line| line == "### Updating from 0.8.1"),
+        "README.md: the section \"Updating and uninstalling\" lacks the heading \"Updating from 0.8.1\""
+    );
+    // The one step of a setup by hand is the command Celata itself shows, word for word.
+    let rule_command = celata::unit::rule_command(None);
+    for file in ["README.md", "docs/manual-setup.md"] {
+        assert!(
+            read(file).contains(&rule_command),
+            "{file} must show the command for the rule of polkit exactly as Celata does: {rule_command}"
+        );
+    }
+    let limitations = section(&readme, "## Known limitations");
+    assert!(
+        limitations.contains("0.8.1") && limitations.contains("favorite"),
+        "README.md, Known limitations: going back to 0.8.1 loses favorite locations and new switches"
+    );
+    assert!(
+        readme.contains("Check for new versions") && readme.contains("api.github.com"),
+        "README.md must name the check for new versions and the one address it asks"
+    );
+}
+
+/// The changelog of version 0.9.0 names every change a user of 0.8.1 notices; one keyword for each.
+#[test]
+fn changelog_names_every_change_since_the_first_release() {
+    let changelog = read("CHANGELOG.md");
+    let entry: String = changelog
+        .lines()
+        .skip_while(|line| !line.starts_with("## [0.9.0]"))
+        .skip(1)
+        .take_while(|line| !line.starts_with("## ["))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase();
+    // Lines of the changelog are wrapped; a keyword may stand across a line break.
+    let flat = entry.split_whitespace().collect::<Vec<_>>().join(" ");
+    for (change, keyword) in [
+        ("colour of the connection state", "colour"),
+        ("icon in the system tray", "system tray"),
+        ("one row per country", "per country"),
+        ("favorite locations", "favorite"),
+        ("best location", "best location"),
+        ("menu at the icon", "menu"),
+        ("notifications", "notification"),
+        ("keep running after closing", "keep running"),
+        ("start at login", "start at login"),
+        ("check for new versions", "check for new versions"),
+        ("one running window", "one running window"),
+        ("command line options", "--unblock"),
+        ("service started by Celata", "polkit"),
+        ("locations by continent", "continent"),
+        ("dark appearance", "dark"),
+        ("setup script", "setup script"),
+    ] {
+        assert!(
+            flat.contains(keyword),
+            "CHANGELOG.md, entry 0.9.0: the change \"{change}\" is not named (keyword {keyword:?})"
+        );
+    }
+    for heading in ["### added", "### changed", "### fixed"] {
+        assert!(
+            entry.lines().any(|line| line == heading),
+            "CHANGELOG.md, entry 0.9.0: no {heading}"
+        );
+    }
+}
+
 /// The documentation is English: no German umlauts, and no reference to working notes.
 #[test]
 fn documentation_is_english() {
@@ -660,6 +942,57 @@ fn documentation_is_english() {
             );
         }
     }
+}
+
+/// The setup script is named in the README as the first way to install, and no document tells the service to
+/// write to `/etc/resolv.conf` only (the system replaces that file, and access to the single file is lost).
+#[test]
+fn the_documentation_names_the_setup_script_and_a_working_drop_in() {
+    let readme = read("README.md");
+    assert!(
+        readme.contains("celata-setup.sh"),
+        "README.md must name the setup script"
+    );
+    let script = readme
+        .find("### With the setup script")
+        .expect("the script has its own section");
+    let package = readme.find("### With a package by hand").expect("the packages follow");
+    let other = readme.find("### Other systems").expect("other systems come last");
+    assert!(
+        script < package && package < other,
+        "script, then package, then other systems"
+    );
+    for (file, content) in own_documents() {
+        for (number, line) in content.lines().enumerate() {
+            assert!(
+                !(line.contains("ReadWritePaths=") && line.contains("/etc/resolv.conf")),
+                "{file}:{}: the whole of /etc must stay writable: {line}",
+                number + 1
+            );
+        }
+    }
+    assert!(readme.contains("ReadWritePaths=/opt/hide.me /etc -/run/systemd/resolve"));
+    let tested = readme.find("## Tested on").unwrap();
+    let install = readme.find("## Install").unwrap();
+    let tested_part = &readme[tested..install];
+    assert!(
+        tested_part.contains("| Linux Mint 22 |") && tested_part.contains("Pop!_OS"),
+        "Mint and the sentence on derivatives"
+    );
+    for untested in ["Debian 12", "Ubuntu 22.04", "Linux Mint 21"] {
+        assert!(
+            !tested_part.contains(untested),
+            "{untested} must not appear under \"Tested on\""
+        );
+    }
+    let derivatives = tested_part
+        .lines()
+        .find(|line| line.contains("Derivatives of these systems"))
+        .unwrap_or("");
+    assert!(
+        !derivatives.contains("Nobara"),
+        "Nobara is named as the system used day to day, not as an example of an untested derivative"
+    );
 }
 
 // --- Licence header and English comments ---
@@ -703,7 +1036,8 @@ fn comment_style(path: &str) -> Option<CommentStyle> {
     let extension = name.rsplit_once('.').map_or("", |(_, extension)| extension);
     match extension {
         "rs" => return Some(CommentStyle::Rust),
-        "slint" => return Some(CommentStyle::Slint),
+        // Rules for polkit are JavaScript: line and block comments as in Slint.
+        "slint" | "rules" => return Some(CommentStyle::Slint),
         "toml" | "sh" | "py" | "yml" | "yaml" | "install" | "prerm" | "postinst" | "postrm" | "preinst" => {
             return Some(CommentStyle::Hash);
         }
@@ -941,6 +1275,17 @@ fn comment_reader_tells_comments_from_strings() {
         german_part("// see `ohne_sperre_wird_nicht_verbunden`, a fundamental check"),
         None
     );
+}
+
+/// The rule for polkit is checked like code: licence header with `//`, English comments.
+#[test]
+fn polkit_rule_is_checked_like_code() {
+    let rule = "packaging/polkit/49-celata.rules";
+    assert_eq!(comment_style(rule), Some(CommentStyle::Slint));
+    assert!(published_sources().iter().any(|path| path == rule));
+    assert!(!WITHOUT_HEADER.contains(&rule));
+    // `rules` without an extension in the Debian directory stays a file with `#` comments.
+    assert_eq!(comment_style("packaging/debian/rules"), Some(CommentStyle::HashLine));
 }
 
 /// Every hand-written source file states its licence in the first lines.

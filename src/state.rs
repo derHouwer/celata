@@ -11,6 +11,7 @@ use crate::look::ExternalIp;
 use crate::servers::is_valid_host;
 use crate::settings::{Ledger, Settings, untested_notice};
 use crate::switch::{self, Phase, SwitchResult, Target, untested_version};
+use crate::unit::{Before, GroupCheck, Interactive, Permit, Progress, StartFailure};
 
 /// What the window shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +37,11 @@ pub enum DisplayState {
     ServiceUnreachable,
     ServiceUnreachableBlocked,
     NoPermission,
+    /// Celata started the service (or found it starting) and waits for its first answer. `blocked`: the
+    /// blocking routes of the kill switch still stand.
+    ServiceStarting {
+        blocked: bool,
+    },
 }
 
 /// Result of evaluating a state of the service.
@@ -98,12 +104,15 @@ pub const EXPECTED_VERSION: &str = "0.9.14";
 /// Name of the service unit in systemd. The only place; the commands below must contain it literally
 /// (test `befehle_nennen_den_einen_dienstnamen`).
 pub const SERVICE_UNIT: &str = "celata-hide.me.service";
-/// Starts the service by hand. Celata never runs it itself.
+/// Starts the service by hand. Celata starts the service through systemd itself but never runs this command; it
+/// stays the fallback in the display.
 pub const START_COMMAND: &str = "sudo systemctl start celata-hide.me.service";
 /// Restarts the service when it runs but does not answer correctly.
 pub const RESTART_COMMAND: &str = "sudo systemctl restart celata-hide.me.service";
 /// Emergency exit: stops the service and thereby lifts the block as well.
 pub const STOP_COMMAND: &str = "sudo systemctl stop celata-hide.me.service";
+/// Shows why the service does not start and its last messages; Celata never reads the log itself.
+pub const STATUS_COMMAND: &str = "systemctl status celata-hide.me.service";
 /// Adds the own user to the group (same command as in the documentation).
 pub const GROUP_COMMAND: &str = "sudo usermod -aG celata \"$USER\"";
 
@@ -124,7 +133,10 @@ impl DisplayState {
     pub fn service_reachable(&self) -> bool {
         !matches!(
             self,
-            Self::ServiceUnreachable | Self::ServiceUnreachableBlocked | Self::NoPermission
+            Self::ServiceUnreachable
+                | Self::ServiceUnreachableBlocked
+                | Self::NoPermission
+                | Self::ServiceStarting { .. }
         )
     }
 
@@ -169,6 +181,16 @@ impl DisplayState {
                 command: Some(GROUP_COMMAND),
                 ..plain(Key::StateNoPermissionTitle, Key::StateNoPermissionText)
             },
+            Self::ServiceStarting { blocked: false } => {
+                plain(Key::StateServiceStartingTitle, Key::StateServiceStartingText)
+            }
+            Self::ServiceStarting { blocked: true } => Message {
+                warning: true,
+                ..plain(
+                    Key::StateServiceStartingBlockedTitle,
+                    Key::StateServiceStartingBlockedText,
+                )
+            },
         }
     }
 }
@@ -189,6 +211,18 @@ pub enum ConnectResult {
     FailedBlocked(Error),
     /// Failed, and releasing with `/destroy` failed as well.
     ReleaseFailed(Error),
+}
+
+impl ConnectResult {
+    /// The service tried the name and it failed. Only then can a name built by Celata
+    /// (`servers::country_host`) count as unknown to hide.me.
+    pub fn name_failed(&self) -> bool {
+        // Deliberately without `_`: a new result is meant to cause a compile error here.
+        match self {
+            Self::FailedReleased(_) | Self::FailedBlocked(_) | Self::ReleaseFailed(_) => true,
+            Self::Connected | Self::NotStarted(_) | Self::Rejected(_) | Self::Untested(_) => false,
+        }
+    }
 }
 
 /// Connects to `target`. `was_free` is the remembered initial state: only if the internet was free before
@@ -344,15 +378,19 @@ pub fn close_decision(display: Option<&DisplayState>) -> CloseDecision {
         Some(DisplayState::ConnectingBlocked | DisplayState::Blocked) => {
             dialog(Key::CloseBlockedText, true, Key::CloseKeepBlocked, None)
         }
-        Some(DisplayState::ServiceUnreachableBlocked) => dialog(
+        Some(DisplayState::ServiceUnreachableBlocked | DisplayState::ServiceStarting { blocked: true }) => dialog(
             Key::CloseOfflineBlockedText,
             false,
             Key::CloseAnyway,
             Some(STOP_COMMAND),
         ),
-        None | Some(DisplayState::NotConnected | DisplayState::ServiceUnreachable | DisplayState::NoPermission) => {
-            CloseDecision::Close
-        }
+        None
+        | Some(
+            DisplayState::NotConnected
+            | DisplayState::ServiceUnreachable
+            | DisplayState::NoPermission
+            | DisplayState::ServiceStarting { blocked: false },
+        ) => CloseDecision::Close,
     }
 }
 
@@ -405,6 +443,8 @@ pub struct StatusView {
     pub switching: bool,
     /// Target of the running switch for the title "Switching to …" or "Back to …".
     pub switch_target: Option<String>,
+    /// Target of the own connection attempt for the title "Connecting to …" (feature 013).
+    pub connect_target: Option<String>,
     /// Offer "Unblock internet".
     pub can_unblock: bool,
     /// Show the warning before lifting the block ([`UNBLOCK_WARNING`]).
@@ -417,6 +457,25 @@ pub struct StatusView {
     pub route_ready: bool,
     /// The operation "Block internet" is running (between the click and the result of `/route`).
     pub routing: bool,
+    /// The service is unreachable, and connecting starts it first: no reason against a start without a password
+    /// is known, and no start is running.
+    pub start_on_connect: bool,
+    /// The button "Start service" (with a password prompt).
+    pub start_button: StartButton,
+    /// Show the section "Fix permanently" with the command for the rule.
+    pub fix_rule: bool,
+    /// Show the link to the setup guide.
+    pub guide_link: bool,
+}
+
+/// The button "Start service" in the status card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StartButton {
+    #[default]
+    Hidden,
+    Ready,
+    /// The password prompt is open: shown, but disabled.
+    Busy,
 }
 
 /// Processes the reports of the observation and remembers what is shown.
@@ -426,6 +485,9 @@ pub struct Monitor {
     detail: Option<Phrase>,
     version_warning: Option<Phrase>,
     notice: Option<Notice>,
+    /// Counts every notice set, also one with the same text as before, so that a message can be told apart
+    /// from the one shown at an earlier moment.
+    notice_count: u64,
     /// Running action of Celata itself, so that no second one starts at the same time.
     action: Option<Action>,
     /// The warning before lifting the block is being shown.
@@ -433,12 +495,51 @@ pub struct Monitor {
     /// State read last with the code `connected`.
     service: Option<ServiceState>,
     external_ip: ExternalIp,
+    /// Start of the service by Celata.
+    start: StartTracker,
+}
+
+/// What Celata knows and does about starting the service, for this session only; nothing of it is stored.
+#[derive(Debug, Clone, Default)]
+struct StartTracker {
+    phase: StartPhase,
+    permit: Permit,
+    /// Reason of the last failed start; it stays until the service answers.
+    failure: Option<StartFailure>,
+    /// Target of the wish to connect that started the service (a host or `best::BEST`).
+    then: Option<String>,
+    /// Target released by the first answer of the service, waiting for `take_connect_after_start`.
+    connect_due: Option<String>,
+    /// Bring a hidden window back once, because a start ended with a reason.
+    reveal: bool,
+    /// Group of this process, read before the last start.
+    group: GroupCheck,
+    /// The check at program start was requested already.
+    checked: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum StartPhase {
+    #[default]
+    Idle,
+    /// The state of the unit is being read before a start. `starting`: "Starting service …" is shown meanwhile
+    /// (a wish to connect); at program start "Checking status …" stays.
+    Checking { starting: bool },
+    /// The password prompt after the button is open.
+    Asking,
+    /// The start was accepted or found running (`own`: accepted from Celata); waiting for the first answer.
+    /// Until `unit_ready` errors of the socket mean "still starting".
+    Running {
+        since: Instant,
+        unit_ready: bool,
+        own: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Action {
-    /// Own connection attempt; `was_free` is the remembered initial state.
-    Connect { was_free: bool },
+    /// Own connection attempt; `was_free` is the remembered initial state, `target` the host.
+    Connect { was_free: bool, target: String },
     /// Disconnecting; `closing` applies to "Disconnect and close".
     Disconnect { closing: bool },
     /// Lifting the block after confirmation.
@@ -447,13 +548,15 @@ enum Action {
     Route,
     /// Switch from `from` to `to`. `stop` is a wish from "Disconnect" (`false`) or "Disconnect and close"
     /// (`true`), which the switch thread carries out after the running step. `reapply`: reconnecting after a
-    /// change of settings, same host.
+    /// change of settings, same host. `called`: the switch thread has reached its first step at the service
+    /// (`switch_proceed`); from then on the target is fixed.
     Switch {
         from: String,
         to: String,
         phase: Phase,
         stop: Option<bool>,
         reapply: bool,
+        called: bool,
     },
 }
 
@@ -536,7 +639,10 @@ fn during_switch(display: DisplayState, target: &str, phase: Phase, stopping: bo
     if reapply
         && !matches!(
             display,
-            DisplayState::ServiceUnreachable | DisplayState::ServiceUnreachableBlocked | DisplayState::NoPermission
+            DisplayState::ServiceUnreachable
+                | DisplayState::ServiceUnreachableBlocked
+                | DisplayState::NoPermission
+                | DisplayState::ServiceStarting { .. }
         )
     {
         return switching();
@@ -570,8 +676,19 @@ impl Monitor {
         self.display.as_ref()
     }
 
+    /// Number of notices set so far; it grows with every new notice, even with the same text.
+    pub fn notice_count(&self) -> u64 {
+        self.notice_count
+    }
+
+    fn count_notice(&mut self) {
+        if self.notice.is_some() {
+            self.notice_count = self.notice_count.wrapping_add(1);
+        }
+    }
+
     fn own_connect_from_free(&self) -> bool {
-        self.action == Some(Action::Connect { was_free: true })
+        matches!(self.action, Some(Action::Connect { was_free: true, .. }))
     }
 
     /// Host of the connected server, if "Connected" is shown and the host is known.
@@ -590,7 +707,10 @@ impl Monitor {
     pub fn begin_connect(&mut self, host: &str) -> Option<Start> {
         if self.view().can_connect {
             let was_free = self.display == Some(DisplayState::NotConnected);
-            self.action = Some(Action::Connect { was_free });
+            self.action = Some(Action::Connect {
+                was_free,
+                target: host.to_owned(),
+            });
             self.notice = None;
             let display = if was_free {
                 DisplayState::Connecting
@@ -613,6 +733,7 @@ impl Monitor {
             phase: Phase::Forward,
             stop: None,
             reapply: false,
+            called: false,
         });
         self.notice = None;
         self.show(
@@ -623,6 +744,75 @@ impl Monitor {
             None,
         );
         Some(Start::Switch { from })
+    }
+
+    /// Replaces the target of a running switch, before the switch thread has called the service
+    /// (`switch_proceed`): "Best location" found that the first candidate has no address. Only for a
+    /// switch to another server, not while reconnecting, not after "Disconnect", only to a valid host other
+    /// than the connected one. Returns whether the target was replaced.
+    pub fn retarget(&mut self, host: &str) -> bool {
+        let Some(Action::Switch {
+            from,
+            to,
+            phase: Phase::Forward,
+            stop: None,
+            reapply: false,
+            called: false,
+        }) = &mut self.action
+        else {
+            return false;
+        };
+        if !is_valid_host(host) || host.eq_ignore_ascii_case(from) {
+            return false;
+        }
+        host.clone_into(to);
+        self.show(
+            DisplayState::Switching {
+                target: host.to_owned(),
+                back: false,
+            },
+            None,
+        );
+        true
+    }
+
+    /// Ends a switch before the switch thread called the service and stays connected to the previous server
+    /// with `notice`: "Best location" found during the check of names that the connected server is the best
+    /// reachable one after all. Not after the first step, not after "Disconnect" was requested, not
+    /// while reconnecting. Returns whether the switch ended.
+    pub fn abandon_switch(&mut self, notice: Phrase) -> bool {
+        let Some(Action::Switch {
+            from,
+            phase: Phase::Forward,
+            stop: None,
+            reapply: false,
+            called: false,
+            ..
+        }) = &self.action
+        else {
+            return false;
+        };
+        let from = from.clone();
+        self.action = None;
+        self.notice = Some(Notice {
+            text: notice,
+            command: None,
+        });
+        self.count_notice();
+        self.show(DisplayState::Connected { server: Some(from) }, None);
+        true
+    }
+
+    /// Shows a notice without starting an operation, for example "Already connected to the best location."
+    /// Only while no operation is running; the notice disappears with the next one. Returns whether it is
+    /// shown.
+    pub fn inform(&mut self, text: Phrase) -> bool {
+        if self.action.is_some() {
+            return false;
+        }
+        self.notice = Some(Notice { text, command: None });
+        self.count_notice();
+        true
     }
 
     /// "Block internet" is possible: "Not connected", no operation, kill switch on in the settings.
@@ -655,6 +845,7 @@ impl Monitor {
             RouteResult::Disabled => Phrase::key(Key::RouteHint),
         };
         self.notice = Some(Notice { text, command: None });
+        self.count_notice();
     }
 
     /// May Celata reconnect now after a change of settings?
@@ -680,6 +871,7 @@ impl Monitor {
             phase: Phase::Forward,
             stop: None,
             reapply: true,
+            called: false,
         });
         self.notice = None;
         self.show(DisplayState::Reapplying { back: false }, None);
@@ -695,11 +887,13 @@ impl Monitor {
             phase: current,
             stop,
             reapply,
+            called,
             ..
         }) = &mut self.action
         else {
             return false;
         };
+        *called = true;
         let reapply = *reapply;
         if let Some(closing) = *stop {
             self.action = Some(Action::Disconnect { closing });
@@ -736,6 +930,7 @@ impl Monitor {
         } else {
             result.notice(&from, &to)
         };
+        self.count_notice();
         let connected = |server: String| DisplayState::Connected { server: Some(server) };
         match result {
             SwitchResult::Switched => self.show(connected(to), None),
@@ -755,6 +950,7 @@ impl Monitor {
         if matches!(self.action, Some(Action::Connect { .. })) {
             self.action = None;
             self.notice = result.notice();
+            self.count_notice();
         }
     }
 
@@ -839,6 +1035,7 @@ impl Monitor {
                 command: Some(STOP_COMMAND),
             },
         });
+        self.count_notice();
     }
 
     /// Ends disconnecting. Returns `true` if the window should close now. If "Disconnect and close" fails,
@@ -858,6 +1055,7 @@ impl Monitor {
                     text: Phrase::with_reason(Phrase::key(text), error.phrase()),
                     command: Some(STOP_COMMAND),
                 });
+                self.count_notice();
                 false
             }
         }
@@ -866,6 +1064,9 @@ impl Monitor {
     /// Processes a report. Returns the answer to the observation and whether the display changes.
     pub fn observe(&mut self, observation: Observation) -> (Flow, bool) {
         let before = self.view();
+        if matches!(observation, Observation::State { .. } | Observation::Busy { .. }) {
+            self.service_answered();
+        }
         let flow = match observation {
             Observation::Version(version) => {
                 self.version_warning = (version != EXPECTED_VERSION).then(|| {
@@ -914,15 +1115,315 @@ impl Monitor {
                 Flow::Continue
             }
             Observation::Failed { error, blocked } => {
-                let detail = match error {
-                    Error::NotRunning | Error::PermissionDenied => None,
-                    ref other => Some(Phrase::fill(Key::DetailReason, [other.phrase()])),
-                };
-                self.show(evaluate_error(&error, blocked), detail);
+                if !self.during_start(&error, blocked) {
+                    let detail = match error {
+                        Error::NotRunning | Error::PermissionDenied => None,
+                        ref other => Some(Phrase::fill(Key::DetailReason, [other.phrase()])),
+                    };
+                    let display = match error {
+                        // Without the group the socket could not be used even if the service ran.
+                        Error::NotRunning | Error::PermissionDenied if self.start.group == GroupCheck::NotMember => {
+                            DisplayState::NoPermission
+                        }
+                        _ => evaluate_error(&error, blocked),
+                    };
+                    self.show(display, detail);
+                }
                 Flow::Continue
             }
         };
         (flow, self.view() != before)
+    }
+
+    // --- Start of the service ---
+
+    /// The first answer of the service ends every start: the reason disappears, and the target of a wish to
+    /// connect is released.
+    fn service_answered(&mut self) {
+        if matches!(
+            self.start.phase,
+            StartPhase::Checking { .. } | StartPhase::Running { .. }
+        ) {
+            self.start.phase = StartPhase::Idle;
+        }
+        if let Some(target) = self.start.then.take() {
+            self.start.connect_due = Some(target);
+        }
+        self.start.failure = None;
+    }
+
+    /// An error of the socket while a start runs. Returns `true` if it was handled here: at program start the
+    /// display stays "Checking status …", during a start it is "Starting service …". Only once the unit is
+    /// active does "No permission" count again.
+    fn during_start(&mut self, error: &Error, blocked: bool) -> bool {
+        let missing = matches!(error, Error::NotRunning | Error::PermissionDenied);
+        let starting = DisplayState::ServiceStarting { blocked };
+        match self.start.phase {
+            StartPhase::Checking { starting: false } if missing => true,
+            StartPhase::Checking { starting: true } | StartPhase::Running { unit_ready: false, .. } if missing => {
+                self.show(starting, None);
+                true
+            }
+            StartPhase::Running { unit_ready: true, .. } if *error == Error::NotRunning => {
+                self.show(starting, None);
+                true
+            }
+            StartPhase::Running { unit_ready: true, .. } if *error == Error::PermissionDenied => {
+                // The service runs, and its socket refuses this process: the usual "No permission".
+                self.end_start(None);
+                self.start.reveal = true;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Ends a start without an answer of the service: back to "Service unavailable" (with the reason, if any).
+    fn end_start(&mut self, failure: Option<StartFailure>) {
+        self.start.phase = StartPhase::Idle;
+        self.start.then = None;
+        if let Some(failure) = failure {
+            self.start.failure = Some(failure);
+            self.start.reveal = true;
+        }
+        if let Some(DisplayState::ServiceStarting { blocked }) = self.display {
+            let display = if blocked {
+                DisplayState::ServiceUnreachableBlocked
+            } else {
+                DisplayState::ServiceUnreachable
+            };
+            self.show(display, None);
+        }
+    }
+
+    /// "Starting service …" from an unreachable display, with the block as it is shown.
+    fn show_starting(&mut self) {
+        let blocked = match self.display {
+            Some(DisplayState::ServiceUnreachableBlocked) => true,
+            Some(DisplayState::ServiceStarting { blocked }) => blocked,
+            Some(DisplayState::ServiceUnreachable) => false,
+            _ => return,
+        };
+        self.show(DisplayState::ServiceStarting { blocked }, None);
+    }
+
+    /// The check at program start, on every way of starting Celata. Returns `false` if it ran already: there is
+    /// only one per run.
+    pub fn begin_startup_check(&mut self) -> bool {
+        if self.start.checked || self.start.phase != StartPhase::Idle {
+            return false;
+        }
+        self.start.checked = true;
+        self.start.phase = StartPhase::Checking { starting: false };
+        true
+    }
+
+    /// A wish to connect while the service is unreachable: starts the service first and remembers `then`, the
+    /// target to connect to after its first answer. Only with `StatusView::start_on_connect`.
+    pub fn request_start(&mut self, then: Option<String>) -> bool {
+        if !self.view().start_on_connect {
+            return false;
+        }
+        self.start.failure = None;
+        self.start.then = then;
+        self.start.phase = StartPhase::Checking { starting: true };
+        self.notice = None;
+        self.show_starting();
+        true
+    }
+
+    /// The decision before the start, read from systemd and the group (`unit::before_start`). Returns `true` if
+    /// `StartUnit` should follow now. Without a running check (for example because the service answered in the
+    /// meantime) it changes nothing.
+    pub fn startup_decided(&mut self, before: Before, group: GroupCheck) -> bool {
+        if !matches!(self.start.phase, StartPhase::Checking { .. }) {
+            return false;
+        }
+        self.start.group = group;
+        let running = StartPhase::Running {
+            since: Instant::now(),
+            unit_ready: false,
+            own: false,
+        };
+        match before {
+            Before::Start => {
+                self.start.phase = running;
+                self.show_starting();
+                true
+            }
+            Before::Wait => {
+                self.start.phase = running;
+                self.show_starting();
+                false
+            }
+            // The socket decides as before.
+            Before::Running => {
+                self.start.phase = StartPhase::Idle;
+                self.start.then = None;
+                false
+            }
+            Before::NotInstalled => {
+                self.end_start(Some(StartFailure::NotInstalled));
+                false
+            }
+            Before::NoSystemBus => {
+                self.end_start(Some(StartFailure::NoSystemBus));
+                false
+            }
+            Before::NoPermission => {
+                self.start.group = GroupCheck::NotMember;
+                self.end_start(None);
+                self.start.reveal = true;
+                self.show(DisplayState::NoPermission, None);
+                false
+            }
+        }
+    }
+
+    /// The answer to `StartUnit` without a password prompt.
+    pub fn start_answered(&mut self, result: Result<(), StartFailure>) {
+        let StartPhase::Running { own: false, .. } = self.start.phase else {
+            return;
+        };
+        self.start.permit = self.start.permit.after(&result);
+        match result {
+            Ok(()) => {
+                self.start.phase = StartPhase::Running {
+                    since: Instant::now(),
+                    unit_ready: false,
+                    own: true,
+                };
+            }
+            Err(failure) => self.end_start(Some(failure)),
+        }
+    }
+
+    /// The state of the unit during a start, every second.
+    pub fn start_progress(&mut self, progress: Progress) {
+        let StartPhase::Running { since, own, .. } = self.start.phase else {
+            return;
+        };
+        match progress {
+            Progress::Waiting => {}
+            Progress::Ready => {
+                self.start.phase = StartPhase::Running {
+                    since,
+                    unit_ready: true,
+                    own,
+                };
+            }
+            // Only waited for a start or stop of someone else: no reason, the next wish to connect decides anew.
+            Progress::Failed if !own => self.end_start(None),
+            Progress::Failed => self.end_start(Some(StartFailure::Failed)),
+            Progress::TimedOut => self.end_start(Some(StartFailure::NoAnswer)),
+        }
+    }
+
+    /// Like [`Monitor::start_progress`], but only for the start that began at `since`: a reading taken for a start
+    /// that has ended meanwhile changes nothing, even if a new start runs now. Returns whether that start is still
+    /// running afterwards, so that the thread following it knows when to stop.
+    pub fn start_progress_for(&mut self, since: Instant, progress: Progress) -> bool {
+        if self.start_since() != Some(since) {
+            return false;
+        }
+        self.start_progress(progress);
+        self.start_since() == Some(since)
+    }
+
+    /// Since when the running start waits, `None` without one. The thread "service-start" polls while it is set.
+    pub fn start_since(&self) -> Option<Instant> {
+        match self.start.phase {
+            StartPhase::Running { since, .. } => Some(since),
+            _ => None,
+        }
+    }
+
+    /// The button "Start service": only while the reason shown is "needs a password" and nothing runs. Returns
+    /// whether the start with a password prompt should follow now.
+    pub fn begin_interactive_start(&mut self) -> bool {
+        if self.view().start_button != StartButton::Ready {
+            return false;
+        }
+        self.start.phase = StartPhase::Asking;
+        true
+    }
+
+    /// The result of the start with a password prompt. Cancelling changes nothing and sets no message.
+    pub fn interactive_answered(&mut self, result: Interactive) {
+        if self.start.phase != StartPhase::Asking {
+            return;
+        }
+        self.start.phase = StartPhase::Idle;
+        match result {
+            Interactive::Started => {
+                self.start.failure = None;
+                self.start.phase = StartPhase::Running {
+                    since: Instant::now(),
+                    unit_ready: false,
+                    own: true,
+                };
+                self.show_starting();
+            }
+            Interactive::Dismissed => {}
+            Interactive::NoPrompt => {
+                self.notice = Some(Notice {
+                    text: Phrase::key(Key::StartNoPromptNotice),
+                    command: Some(START_COMMAND),
+                });
+                self.count_notice();
+            }
+            Interactive::Failed(failure) => self.end_start(Some(failure)),
+        }
+    }
+
+    /// The target of the wish to connect, once, after the first answer of the service that it started.
+    pub fn take_connect_after_start(&mut self) -> Option<String> {
+        self.start.connect_due.take()
+    }
+
+    /// Once per start that ended with a reason: bring a hidden window back.
+    pub fn take_reveal(&mut self) -> bool {
+        std::mem::take(&mut self.start.reveal)
+    }
+
+    /// Reason shown in the status card: the last failure, otherwise "needs a password" if that is known for this
+    /// session and the service is unreachable.
+    fn shown_reason(&self, display: &DisplayState) -> Option<StartFailure> {
+        if !matches!(
+            display,
+            DisplayState::ServiceUnreachable | DisplayState::ServiceUnreachableBlocked
+        ) {
+            return None;
+        }
+        self.start
+            .failure
+            .or((self.start.permit == Permit::NeedsPassword).then_some(StartFailure::NeedsPassword))
+    }
+
+    /// Connecting starts the service first: unreachable without a fault, nothing running, and no reason known
+    /// against a start without a password.
+    fn start_on_connect(&self, display: &DisplayState) -> bool {
+        matches!(
+            display,
+            DisplayState::ServiceUnreachable | DisplayState::ServiceUnreachableBlocked
+        ) && self.detail.is_none()
+            && self.action.is_none()
+            && self.start.phase == StartPhase::Idle
+            && self.start.permit != Permit::NeedsPassword
+            && self.start.group != GroupCheck::NotMember
+            && !matches!(
+                self.start.failure,
+                Some(StartFailure::NotInstalled | StartFailure::NoSystemBus | StartFailure::NeedsPassword)
+            )
+    }
+
+    /// For tests elsewhere: a start of the service is not possible in this session (no system bus), so that the
+    /// display is the one from before Celata started the service itself.
+    #[cfg(test)]
+    pub(crate) fn without_start(&mut self) {
+        assert!(self.begin_startup_check());
+        self.startup_decided(Before::NoSystemBus, GroupCheck::Member);
+        self.take_reveal();
     }
 
     /// "Unblock internet" is possible in "Internet blocked" and "Connecting, internet blocked", also during a
@@ -942,16 +1443,17 @@ impl Monitor {
             phase,
             stop,
             reapply,
+            ..
         }) = &self.action
         {
             let target = if *phase == Phase::Back { from } else { to };
             return during_switch(display, target, *phase, stop.is_some(), *reapply);
         }
         match (&self.action, display) {
-            (Some(Action::Connect { was_free: true }), DisplayState::NotConnected | DisplayState::Blocked) => {
+            (Some(Action::Connect { was_free: true, .. }), DisplayState::NotConnected | DisplayState::Blocked) => {
                 DisplayState::Connecting
             }
-            (Some(Action::Connect { was_free: false }), DisplayState::NotConnected | DisplayState::Blocked) => {
+            (Some(Action::Connect { was_free: false, .. }), DisplayState::NotConnected | DisplayState::Blocked) => {
                 DisplayState::ConnectingBlocked
             }
             (_, display) => display,
@@ -1020,12 +1522,17 @@ impl Monitor {
                 connected_host: String::new(),
                 switching: false,
                 switch_target: None,
+                connect_target: None,
                 can_unblock: false,
                 unblock_asked: false,
                 service: None,
                 external_ip: self.external_ip.clone(),
                 route_ready: false,
                 routing: false,
+                start_on_connect: false,
+                start_button: StartButton::Hidden,
+                fix_rule: false,
+                guide_link: false,
             };
         };
         let mut message = display.message();
@@ -1035,8 +1542,62 @@ impl Monitor {
             message.text = Key::StateServiceFaultyText;
             message.command = Some(RESTART_COMMAND);
         }
+        let reason = self.shown_reason(display);
+        let start_on_connect = self.start_on_connect(display);
+        if *display == DisplayState::ServiceUnreachable && self.detail.is_none() {
+            let set = |message: &mut Message, title, text, command| {
+                message.title = title;
+                message.text = text;
+                message.command = command;
+            };
+            match reason {
+                Some(StartFailure::NeedsPassword) => set(
+                    &mut message,
+                    Key::StartNeedsPasswordTitle,
+                    Key::StartNeedsPasswordText,
+                    None,
+                ),
+                Some(StartFailure::NotInstalled) => set(
+                    &mut message,
+                    Key::StartNotInstalledTitle,
+                    Key::StartNotInstalledText,
+                    None,
+                ),
+                Some(StartFailure::Failed) => set(
+                    &mut message,
+                    Key::StartFailedTitle,
+                    Key::StartFailedText,
+                    Some(STATUS_COMMAND),
+                ),
+                None if start_on_connect => {
+                    message.text = Key::StateServiceUnreachableAutoText;
+                    message.command = None;
+                }
+                // "No answer" and "no system bus" keep the message with the command to start by hand.
+                Some(StartFailure::NoAnswer | StartFailure::NoSystemBus) | None => {}
+            }
+        }
+        let start_button = match (self.start.phase, reason) {
+            (StartPhase::Asking, _) => StartButton::Busy,
+            (StartPhase::Idle, Some(StartFailure::NeedsPassword)) if self.action.is_none() => StartButton::Ready,
+            _ => StartButton::Hidden,
+        };
         if let Some(command) = self.notice.as_ref().and_then(|notice| notice.command) {
             message.command = Some(command);
+        }
+        // The own connection attempt names its target: "Connecting to {0} …" (feature 013, for every way of
+        // connecting).
+        let connect_target = match (&self.action, display) {
+            (Some(Action::Connect { target, .. }), DisplayState::Connecting | DisplayState::ConnectingBlocked) => {
+                Some(target.clone())
+            }
+            _ => None,
+        };
+        if connect_target.is_some() {
+            message.title = match display {
+                DisplayState::ConnectingBlocked => Key::StateConnectingBlockedToTitle,
+                _ => Key::StateConnectingToTitle,
+            };
         }
         StatusView {
             message,
@@ -1058,12 +1619,17 @@ impl Monitor {
                 DisplayState::Switching { target, .. } => Some(target.clone()),
                 _ => None,
             },
+            connect_target,
             can_unblock: self.can_unblock(display),
             unblock_asked: self.unblock_asked && self.can_unblock(display),
             service: self.service.clone(),
             external_ip: self.external_ip.clone(),
             route_ready: self.can_route(true),
             routing: self.action == Some(Action::Route),
+            start_on_connect,
+            start_button,
+            fix_rule: reason == Some(StartFailure::NeedsPassword),
+            guide_link: matches!(reason, Some(StartFailure::NeedsPassword | StartFailure::NotInstalled)),
         }
     }
 }
@@ -1185,6 +1751,8 @@ mod tests {
             },
             DisplayState::Reapplying { back: false },
             DisplayState::Reapplying { back: true },
+            DisplayState::ServiceStarting { blocked: false },
+            DisplayState::ServiceStarting { blocked: true },
         ]
     }
 
@@ -1240,7 +1808,11 @@ mod tests {
 
     #[test]
     fn fehlerzustaende_nennen_einen_naechsten_schritt() {
-        for state in all().iter().filter(|state| !state.service_reachable()) {
+        // "Starting service …" is no failure: it ends by itself.
+        for state in all()
+            .iter()
+            .filter(|state| !state.service_reachable() && !matches!(state, DisplayState::ServiceStarting { .. }))
+        {
             let message = state.message();
             assert!(message.command.is_some(), "{state:?}");
         }
@@ -1282,6 +1854,8 @@ mod tests {
         ] {
             assert_eq!(command, format!("sudo systemctl {verb} {SERVICE_UNIT}"));
         }
+        // Reading the state needs no `sudo`.
+        assert_eq!(STATUS_COMMAND, format!("systemctl status {SERVICE_UNIT}"));
     }
 
     /// A server name from the service is shown without control characters and bounded.
@@ -1322,7 +1896,10 @@ mod tests {
         for state in all() {
             let blocked = matches!(
                 state,
-                DisplayState::Blocked | DisplayState::ConnectingBlocked | DisplayState::ServiceUnreachableBlocked
+                DisplayState::Blocked
+                    | DisplayState::ConnectingBlocked
+                    | DisplayState::ServiceUnreachableBlocked
+                    | DisplayState::ServiceStarting { blocked: true }
             );
             assert_eq!(state.message().warning, blocked, "{state:?}");
         }
@@ -1386,7 +1963,21 @@ mod tests {
             error: Error::NotRunning,
             blocked: false,
         });
+        // Celata may start the service: connecting starts it, no command.
         let view = monitor.view();
+        assert!(view.start_on_connect);
+        assert_eq!(view.message.command, None);
+        assert_eq!(view.message.text, Key::StateServiceUnreachableAutoText);
+        assert_eq!(view.detail, None);
+        // Without a possible start the command as before.
+        let mut monitor = Monitor::new();
+        monitor.without_start();
+        monitor.observe(Observation::Failed {
+            error: Error::NotRunning,
+            blocked: false,
+        });
+        let view = monitor.view();
+        assert!(!view.start_on_connect);
         assert_eq!(view.message.command, Some(START_COMMAND));
         assert_eq!(view.detail, None);
 
@@ -1445,6 +2036,495 @@ mod tests {
         monitor.observe(observed("clean", None, false));
         assert_eq!(monitor.display(), Some(&DisplayState::NotConnected));
         assert_eq!(monitor.view().detail, None);
+    }
+
+    // --- Start of the service (feature 015) ---
+
+    fn failed(error: Error, blocked: bool) -> Observation {
+        Observation::Failed { error, blocked }
+    }
+
+    fn not_running(blocked: bool) -> Observation {
+        failed(Error::NotRunning, blocked)
+    }
+
+    /// Unreachable service, nothing started yet.
+    fn unreachable(blocked: bool) -> Monitor {
+        let mut monitor = Monitor::new();
+        monitor.observe(not_running(blocked));
+        monitor
+    }
+
+    /// A start at program start that systemd accepted.
+    fn started_at_program_start() -> Monitor {
+        let mut monitor = Monitor::new();
+        assert!(monitor.begin_startup_check());
+        assert!(monitor.startup_decided(Before::Start, GroupCheck::Member));
+        monitor.start_answered(Ok(()));
+        monitor
+    }
+
+    #[test]
+    fn dienst_wird_gestartet_ist_ein_eigener_zustand() {
+        for blocked in [false, true] {
+            let state = DisplayState::ServiceStarting { blocked };
+            assert!(!state.service_reachable());
+            let message = state.message();
+            assert_eq!(message.command, None);
+            assert_eq!(message.warning, blocked);
+            let (title, text) = if blocked {
+                (
+                    Key::StateServiceStartingBlockedTitle,
+                    Key::StateServiceStartingBlockedText,
+                )
+            } else {
+                (Key::StateServiceStartingTitle, Key::StateServiceStartingText)
+            };
+            assert_eq!((message.title, message.text), (title, text));
+        }
+        assert_eq!(
+            DisplayState::ServiceStarting { blocked: false }.message().title.de(),
+            "Dienst wird gestartet …"
+        );
+        // Closing as for "Service unavailable", with the block as for "…, internet blocked".
+        assert_eq!(
+            close_decision(Some(&DisplayState::ServiceStarting { blocked: false })),
+            CloseDecision::Close
+        );
+        assert_eq!(
+            close_decision(Some(&DisplayState::ServiceStarting { blocked: true })),
+            close_decision(Some(&DisplayState::ServiceUnreachableBlocked))
+        );
+        // Nothing to connect to while it starts.
+        let mut monitor = unreachable(false);
+        assert!(monitor.request_start(None));
+        assert_eq!(
+            monitor.display(),
+            Some(&DisplayState::ServiceStarting { blocked: false })
+        );
+        let view = monitor.view();
+        assert!(!view.can_connect && !view.start_on_connect);
+        assert_eq!(view.start_button, StartButton::Hidden);
+    }
+
+    #[test]
+    fn beim_programmstart_zeigen_fehler_des_sockets_die_pruefung() {
+        let mut monitor = Monitor::new();
+        assert!(monitor.begin_startup_check());
+        for error in [Error::NotRunning, Error::PermissionDenied] {
+            monitor.observe(failed(error, false));
+            assert_eq!(monitor.display(), None);
+            assert_eq!(monitor.view().message.title, Key::StateCheckingTitle);
+        }
+        // After the decision to start: "Starting service …", with the block from the routes.
+        assert!(monitor.startup_decided(Before::Start, GroupCheck::Member));
+        monitor.observe(not_running(false));
+        assert_eq!(
+            monitor.display(),
+            Some(&DisplayState::ServiceStarting { blocked: false })
+        );
+        monitor.observe(failed(Error::PermissionDenied, true));
+        assert_eq!(
+            monitor.display(),
+            Some(&DisplayState::ServiceStarting { blocked: true })
+        );
+        // Waiting for a start of someone else looks the same, without `StartUnit`.
+        let mut waiting = Monitor::new();
+        assert!(waiting.begin_startup_check());
+        assert!(!waiting.startup_decided(Before::Wait, GroupCheck::Member));
+        waiting.observe(failed(Error::PermissionDenied, false));
+        assert_eq!(
+            waiting.display(),
+            Some(&DisplayState::ServiceStarting { blocked: false })
+        );
+    }
+
+    #[test]
+    fn erst_die_aktive_unit_macht_keine_berechtigung_wieder_moeglich() {
+        let mut monitor = started_at_program_start();
+        assert_eq!(monitor.start.permit, Permit::Allowed);
+        // The socket belongs to root for a moment: still "Starting service …".
+        monitor.observe(failed(Error::PermissionDenied, false));
+        assert_eq!(
+            monitor.display(),
+            Some(&DisplayState::ServiceStarting { blocked: false })
+        );
+        monitor.start_progress(Progress::Ready);
+        monitor.observe(not_running(false));
+        assert_eq!(
+            monitor.display(),
+            Some(&DisplayState::ServiceStarting { blocked: false })
+        );
+        monitor.observe(failed(Error::PermissionDenied, false));
+        assert_eq!(monitor.display(), Some(&DisplayState::NoPermission));
+        assert!(monitor.take_reveal());
+        assert_eq!(monitor.start_since(), None);
+    }
+
+    #[test]
+    fn erste_antwort_beendet_den_start_ohne_aktion() {
+        let mut monitor = started_at_program_start();
+        monitor.observe(not_running(false));
+        assert!(monitor.start_since().is_some());
+        monitor.observe(observed("clean", None, false));
+        assert_eq!(monitor.display(), Some(&DisplayState::NotConnected));
+        assert_eq!(monitor.start_since(), None);
+        assert_eq!(monitor.start.failure, None);
+        // No connecting by itself, and a hidden window stays hidden.
+        assert_eq!(monitor.take_connect_after_start(), None);
+        assert!(!monitor.take_reveal());
+        assert!(monitor.action.is_none());
+        // Only one check per run.
+        assert!(!monitor.begin_startup_check());
+    }
+
+    #[test]
+    fn laufender_dienst_wird_nicht_gestartet() {
+        let mut monitor = Monitor::new();
+        assert!(monitor.begin_startup_check());
+        assert!(!monitor.begin_startup_check(), "a second check does nothing");
+        assert!(!monitor.startup_decided(Before::Running, GroupCheck::Member));
+        assert_eq!(monitor.start_since(), None);
+        // The socket decides as before.
+        monitor.observe(observed("clean", None, false));
+        assert_eq!(monitor.display(), Some(&DisplayState::NotConnected));
+        // A decision after an answer of the service changes nothing.
+        let mut answered = Monitor::new();
+        assert!(answered.begin_startup_check());
+        answered.observe(observed("clean", None, false));
+        assert!(!answered.startup_decided(Before::Start, GroupCheck::Member));
+        assert_eq!(answered.start_since(), None);
+    }
+
+    #[test]
+    fn verschwundener_dienst_wird_nur_auf_wunsch_gestartet() {
+        let mut monitor = started_at_program_start();
+        monitor.observe(observed("clean", None, false));
+        for blocked in [false, true] {
+            for _ in 0..120 {
+                monitor.observe(not_running(blocked));
+            }
+            let expected = if blocked {
+                DisplayState::ServiceUnreachableBlocked
+            } else {
+                DisplayState::ServiceUnreachable
+            };
+            assert_eq!(monitor.display(), Some(&expected));
+            assert_eq!(monitor.start_since(), None, "no start by itself");
+            let view = monitor.view();
+            assert!(view.start_on_connect);
+            assert!(!view.can_connect);
+        }
+        let view = unreachable(false).view();
+        assert_eq!(view.message.title, Key::StateServiceUnreachableTitle);
+        assert_eq!(view.message.text, Key::StateServiceUnreachableAutoText);
+        assert_eq!(view.message.command, None);
+    }
+
+    #[test]
+    fn starten_beim_verbinden_je_erlaubnis_und_grund() {
+        // Unknown and allowed permit: connecting starts the service.
+        assert!(unreachable(false).view().start_on_connect);
+        assert!(unreachable(true).view().start_on_connect);
+        let mut allowed = started_at_program_start();
+        allowed.observe(observed("clean", None, false));
+        allowed.observe(not_running(false));
+        assert!(allowed.view().start_on_connect);
+        // Reachable service, no permission, a running start: no.
+        assert!(!monitor_in("clean", false).view().start_on_connect);
+        let mut no_permission = Monitor::new();
+        no_permission.observe(failed(Error::PermissionDenied, false));
+        assert!(!no_permission.view().start_on_connect);
+        let mut starting = unreachable(false);
+        assert!(starting.request_start(None));
+        assert!(!starting.view().start_on_connect);
+        // A faulty service is not started.
+        let mut faulty = Monitor::new();
+        faulty.observe(failed(Error::Timeout, false));
+        assert!(!faulty.view().start_on_connect);
+        // Reasons.
+        for (failure, expected) in [
+            (StartFailure::NeedsPassword, false),
+            (StartFailure::NotInstalled, false),
+            (StartFailure::NoSystemBus, false),
+            (StartFailure::Failed, true),
+            (StartFailure::NoAnswer, true),
+        ] {
+            let mut monitor = unreachable(false);
+            assert!(monitor.request_start(None));
+            assert!(monitor.startup_decided(Before::Start, GroupCheck::Member));
+            match failure {
+                StartFailure::Failed | StartFailure::NoAnswer => {
+                    monitor.start_answered(Ok(()));
+                    monitor.start_progress(if failure == StartFailure::Failed {
+                        Progress::Failed
+                    } else {
+                        Progress::TimedOut
+                    });
+                }
+                other => monitor.start_answered(Err(other)),
+            }
+            monitor.observe(not_running(false));
+            assert_eq!(monitor.view().start_on_connect, expected, "{failure:?}");
+        }
+    }
+
+    #[test]
+    fn ziel_des_verbindungswunsches_genau_einmal() {
+        let mut monitor = unreachable(false);
+        assert!(!monitor_in("clean", false).request_start(Some(NL.into())));
+        assert!(monitor.request_start(Some(NL.into())));
+        assert!(
+            !monitor.request_start(Some("de.hideservers.net".into())),
+            "only one start"
+        );
+        assert!(monitor.startup_decided(Before::Start, GroupCheck::Member));
+        monitor.start_answered(Ok(()));
+        monitor.observe(not_running(false));
+        assert_eq!(monitor.take_connect_after_start(), None, "not before the answer");
+        monitor.observe(observed("clean", None, false));
+        assert_eq!(monitor.take_connect_after_start(), Some(NL.to_owned()));
+        assert_eq!(monitor.take_connect_after_start(), None);
+        assert!(monitor.view().can_connect);
+        // A failed start discards the target.
+        let mut failed_start = unreachable(false);
+        assert!(failed_start.request_start(Some(NL.into())));
+        assert!(failed_start.startup_decided(Before::Start, GroupCheck::Member));
+        failed_start.start_answered(Err(StartFailure::NeedsPassword));
+        failed_start.observe(observed("clean", None, false));
+        assert_eq!(failed_start.take_connect_after_start(), None);
+        // As does a unit that is not set up.
+        let mut missing = unreachable(false);
+        assert!(missing.request_start(Some(NL.into())));
+        assert!(!missing.startup_decided(Before::NotInstalled, GroupCheck::Member));
+        missing.observe(observed("clean", None, false));
+        assert_eq!(missing.take_connect_after_start(), None);
+    }
+
+    /// Unreachable display after a start that ended with `failure`.
+    fn after_failure(failure: StartFailure, blocked: bool) -> Monitor {
+        let mut monitor = unreachable(blocked);
+        assert!(monitor.request_start(None));
+        match failure {
+            StartFailure::NotInstalled => {
+                monitor.startup_decided(Before::NotInstalled, GroupCheck::Member);
+            }
+            StartFailure::NoSystemBus => {
+                monitor.startup_decided(Before::NoSystemBus, GroupCheck::Member);
+            }
+            StartFailure::NeedsPassword => {
+                monitor.startup_decided(Before::Start, GroupCheck::Member);
+                monitor.start_answered(Err(StartFailure::NeedsPassword));
+            }
+            StartFailure::Failed => {
+                monitor.startup_decided(Before::Start, GroupCheck::Member);
+                monitor.start_answered(Ok(()));
+                monitor.start_progress(Progress::Failed);
+            }
+            StartFailure::NoAnswer => {
+                monitor.startup_decided(Before::Start, GroupCheck::Member);
+                monitor.start_answered(Ok(()));
+                monitor.start_progress(Progress::TimedOut);
+            }
+        }
+        monitor.observe(not_running(blocked));
+        monitor
+    }
+
+    #[test]
+    fn jeder_grund_nennt_den_naechsten_schritt() {
+        let cases = [
+            (
+                StartFailure::NeedsPassword,
+                Key::StartNeedsPasswordTitle,
+                Key::StartNeedsPasswordText,
+                None,
+                (StartButton::Ready, true, true),
+            ),
+            (
+                StartFailure::NotInstalled,
+                Key::StartNotInstalledTitle,
+                Key::StartNotInstalledText,
+                None,
+                (StartButton::Hidden, false, true),
+            ),
+            (
+                StartFailure::Failed,
+                Key::StartFailedTitle,
+                Key::StartFailedText,
+                Some(STATUS_COMMAND),
+                (StartButton::Hidden, false, false),
+            ),
+            (
+                StartFailure::NoAnswer,
+                Key::StateServiceUnreachableTitle,
+                Key::StateServiceUnreachableText,
+                Some(START_COMMAND),
+                (StartButton::Hidden, false, false),
+            ),
+            (
+                StartFailure::NoSystemBus,
+                Key::StateServiceUnreachableTitle,
+                Key::StateServiceUnreachableText,
+                Some(START_COMMAND),
+                (StartButton::Hidden, false, false),
+            ),
+        ];
+        for (failure, title, text, command, (button, fix_rule, guide_link)) in cases {
+            let mut monitor = after_failure(failure, false);
+            assert_eq!(monitor.display(), Some(&DisplayState::ServiceUnreachable));
+            assert!(monitor.take_reveal(), "{failure:?}: window comes back");
+            assert!(!monitor.take_reveal(), "{failure:?}: only once");
+            let view = monitor.view();
+            assert_eq!((view.message.title, view.message.text), (title, text), "{failure:?}");
+            assert_eq!(view.message.command, command, "{failure:?}");
+            assert_eq!(
+                (view.start_button, view.fix_rule, view.guide_link),
+                (button, fix_rule, guide_link),
+                "{failure:?}"
+            );
+            // Never a start by itself after a reason.
+            for _ in 0..30 {
+                monitor.observe(not_running(false));
+            }
+            assert_eq!(monitor.start_since(), None, "{failure:?}");
+            // With the block the message stays; button, section and link come in addition.
+            let blocked = after_failure(failure, true).view();
+            assert_eq!(
+                blocked.message.title,
+                Key::StateServiceUnreachableBlockedTitle,
+                "{failure:?}"
+            );
+            assert_eq!(blocked.message.command, Some(STOP_COMMAND), "{failure:?}");
+            assert_eq!(
+                (blocked.start_button, blocked.fix_rule, blocked.guide_link),
+                (button, fix_rule, guide_link),
+                "{failure:?}"
+            );
+        }
+        // A faulty service keeps its message.
+        let mut faulty = Monitor::new();
+        faulty.observe(failed(Error::Timeout, false));
+        assert_eq!(faulty.view().message.title, Key::StateServiceFaultyTitle);
+        // The first answer removes the reason.
+        let mut monitor = after_failure(StartFailure::Failed, false);
+        monitor.observe(observed("clean", None, false));
+        monitor.observe(not_running(false));
+        assert_eq!(monitor.view().message.text, Key::StateServiceUnreachableAutoText);
+    }
+
+    #[test]
+    fn ohne_gruppe_keine_berechtigung_ohne_startversuch() {
+        let mut monitor = Monitor::new();
+        assert!(monitor.begin_startup_check());
+        assert!(!monitor.startup_decided(Before::NoPermission, GroupCheck::NotMember));
+        assert_eq!(monitor.display(), Some(&DisplayState::NoPermission));
+        assert!(monitor.take_reveal());
+        monitor.observe(not_running(false));
+        assert_eq!(monitor.display(), Some(&DisplayState::NoPermission));
+        let view = monitor.view();
+        assert_eq!(view.message.command, Some(GROUP_COMMAND));
+        assert!(!view.start_on_connect);
+        assert_eq!(monitor.start_since(), None);
+    }
+
+    #[test]
+    fn knopf_dienst_starten() {
+        // Only with the reason "needs a password".
+        for failure in [StartFailure::NotInstalled, StartFailure::Failed, StartFailure::NoAnswer] {
+            assert!(!after_failure(failure, false).begin_interactive_start(), "{failure:?}");
+        }
+        assert!(!unreachable(false).begin_interactive_start());
+        let mut monitor = after_failure(StartFailure::NeedsPassword, false);
+        assert!(monitor.begin_interactive_start());
+        assert_eq!(monitor.view().start_button, StartButton::Busy);
+        assert!(monitor.view().fix_rule);
+        assert!(!monitor.begin_interactive_start(), "one prompt at a time");
+        // Cancelled or wrong password: nothing changes, no message.
+        let count = monitor.notice_count();
+        monitor.interactive_answered(Interactive::Dismissed);
+        assert_eq!(monitor.view().start_button, StartButton::Ready);
+        assert_eq!(monitor.view().notice, None);
+        assert_eq!(monitor.notice_count(), count);
+        // No agent for the prompt: one message with the command.
+        assert!(monitor.begin_interactive_start());
+        monitor.interactive_answered(Interactive::NoPrompt);
+        let view = monitor.view();
+        assert_eq!(view.start_button, StartButton::Ready);
+        assert_eq!(
+            view.notice.as_ref().map(|notice| notice.command),
+            Some(Some(START_COMMAND))
+        );
+        assert_eq!(
+            view.notice.map(|notice| notice.text),
+            Some(Phrase::key(Key::StartNoPromptNotice))
+        );
+        assert_eq!(monitor.notice_count(), count + 1);
+        // Another reason from the prompt.
+        assert!(monitor.begin_interactive_start());
+        monitor.interactive_answered(Interactive::Failed(StartFailure::NotInstalled));
+        assert_eq!(monitor.view().message.title, Key::StartNotInstalledTitle);
+        // Started with the password: "Starting service …", then "Not connected".
+        let mut monitor = after_failure(StartFailure::NeedsPassword, false);
+        assert!(monitor.begin_interactive_start());
+        monitor.interactive_answered(Interactive::Started);
+        assert_eq!(
+            monitor.display(),
+            Some(&DisplayState::ServiceStarting { blocked: false })
+        );
+        assert!(monitor.start_since().is_some());
+        monitor.observe(observed("clean", None, false));
+        assert_eq!(monitor.display(), Some(&DisplayState::NotConnected));
+        // A start with the password does not change the permit: if the service goes again, the button comes back.
+        assert_eq!(monitor.start.permit, Permit::NeedsPassword);
+        monitor.observe(not_running(false));
+        let view = monitor.view();
+        assert_eq!(view.message.title, Key::StartNeedsPasswordTitle);
+        assert_eq!(view.start_button, StartButton::Ready);
+        assert!(view.fix_rule && view.guide_link);
+        assert!(!view.start_on_connect);
+        assert!(monitor.begin_interactive_start());
+    }
+
+    #[test]
+    fn fortschritt_gilt_nur_fuer_den_verfolgten_start() {
+        // A start ends with the first answer of the service, a new one begins at once (the service vanished again).
+        let mut monitor = started_at_program_start();
+        let old = monitor.start_since().expect("start runs");
+        monitor.observe(observed("clean", None, false));
+        monitor.observe(not_running(false));
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert!(monitor.request_start(None));
+        assert!(monitor.startup_decided(Before::Start, GroupCheck::Member));
+        monitor.start_answered(Ok(()));
+        let new = monitor.start_since().expect("new start runs");
+        assert_ne!(old, new);
+        // The thread of the old start reports late, with its own times: no effect on the new start.
+        for progress in [Progress::TimedOut, Progress::Failed, Progress::Ready] {
+            assert!(!monitor.start_progress_for(old, progress), "{progress:?}");
+        }
+        assert_eq!(monitor.start_since(), Some(new));
+        assert_eq!(monitor.start.failure, None);
+        assert!(!monitor.take_reveal());
+        // The thread of the new start goes on while it runs and learns when it has ended.
+        assert!(monitor.start_progress_for(new, Progress::Waiting));
+        assert!(monitor.start_progress_for(new, Progress::Ready));
+        assert!(!monitor.start_progress_for(new, Progress::TimedOut));
+        assert_eq!(monitor.start.failure, Some(StartFailure::NoAnswer));
+        assert!(!monitor.start_progress_for(new, Progress::Waiting));
+    }
+
+    #[test]
+    fn nur_eigener_start_meldet_ein_scheitern() {
+        // A start of someone else that ended: no reason, the next wish decides anew.
+        let mut monitor = Monitor::new();
+        assert!(monitor.begin_startup_check());
+        assert!(!monitor.startup_decided(Before::Wait, GroupCheck::Member));
+        monitor.start_progress(Progress::Failed);
+        assert_eq!(monitor.start.failure, None);
+        assert!(!monitor.take_reveal());
+        monitor.observe(not_running(false));
+        assert!(monitor.view().start_on_connect);
     }
 
     // --- Connecting ---
@@ -1820,6 +2900,10 @@ mod tests {
             error: Error::NotRunning,
             blocked: false,
         });
+        // Not running: connecting starts it.
+        assert!(monitor.view().start_on_connect);
+        assert_eq!(monitor.view().message.command, None);
+        monitor.without_start();
         assert_eq!(monitor.view().message.command, Some(START_COMMAND));
     }
 
@@ -1845,7 +2929,20 @@ mod tests {
                     blocked,
                 });
                 let view = monitor.view();
-                assert!(view.message.command.is_some(), "{error:?}, gesperrt: {blocked}");
+                // The next step is a command, or connecting, which starts the service first.
+                assert!(
+                    view.message.command.is_some() || view.start_on_connect,
+                    "{error:?}, gesperrt: {blocked}"
+                );
+                monitor.without_start();
+                monitor.observe(Observation::Failed {
+                    error: error.clone(),
+                    blocked,
+                });
+                assert!(
+                    monitor.view().message.command.is_some(),
+                    "{error:?}, gesperrt: {blocked}"
+                );
             }
         }
     }
@@ -1892,6 +2989,168 @@ mod tests {
         DisplayState::Switching {
             target: target.to_owned(),
             back,
+        }
+    }
+
+    // --- Target while connecting, retarget, inform (feature 013) ---
+
+    const BERLIN: &str = "berlin.hideservers.net";
+
+    #[test]
+    fn verbinden_nennt_das_ziel() {
+        let mut monitor = monitor_in("clean", false);
+        assert_eq!(monitor.view().connect_target, None);
+        assert_eq!(monitor.begin_connect(BERLIN), Some(Start::Connect { was_free: true }));
+        let view = monitor.view();
+        assert_eq!(view.connect_target.as_deref(), Some(BERLIN));
+        assert_eq!(view.message.title, Key::StateConnectingToTitle);
+        assert_eq!(view.message.title.de(), "Verbinde mit {0} …");
+        assert_eq!(view.switch_target, None);
+        // Intermediate states of the service keep the target.
+        monitor.observe(observed("connecting", None, true));
+        assert_eq!(monitor.view().connect_target.as_deref(), Some(BERLIN));
+        // After the result the target is gone.
+        monitor.finish_connect(&ConnectResult::Connected);
+        monitor.observe(observed("connected", Some(BERLIN), true));
+        let view = monitor.view();
+        assert_eq!(view.connect_target, None);
+        assert_eq!(view.message.title, Key::StateConnectedTitle);
+    }
+
+    #[test]
+    fn verbinden_aus_der_sperre_nennt_das_ziel() {
+        let mut monitor = monitor_in("routed", true);
+        assert_eq!(monitor.begin_connect(BERLIN), Some(Start::Connect { was_free: false }));
+        let view = monitor.view();
+        assert_eq!(view.connect_target.as_deref(), Some(BERLIN));
+        assert_eq!(view.message.title, Key::StateConnectingBlockedToTitle);
+        assert!(view.message.warning);
+        assert_eq!(
+            crate::i18n::text(Language::En, view.message.title),
+            "Connecting to {0}, internet blocked"
+        );
+    }
+
+    #[test]
+    fn ohne_eigenes_verbinden_bleiben_die_bisherigen_titel() {
+        for (code, blocked, title) in [
+            ("connecting", false, Key::StateConnectingTitle),
+            ("connecting", true, Key::StateConnectingBlockedTitle),
+        ] {
+            let monitor = monitor_in(code, blocked);
+            let view = monitor.view();
+            assert_eq!(view.connect_target, None, "{code}");
+            assert_eq!(view.message.title, title, "{code}");
+        }
+        // A switch keeps its own title.
+        let mut switching = connected_to(NL);
+        switching.begin_connect(DE).unwrap();
+        assert_eq!(switching.view().connect_target, None);
+        assert_eq!(switching.view().message.title, Key::StateSwitchingTitle);
+    }
+
+    #[test]
+    fn neues_ziel_nur_vor_dem_ersten_schritt_des_wechsels() {
+        let mut monitor = connected_to(NL);
+        monitor.begin_connect(DE).unwrap();
+        // Invalid, connected host or "best": no.
+        for host in ["best", "", NL, "NL.hideservers.net", "x.example.org"] {
+            assert!(!monitor.retarget(host), "{host}");
+        }
+        assert!(monitor.retarget(BERLIN));
+        assert_eq!(monitor.display(), Some(&switching_to(BERLIN, false)));
+        assert_eq!(monitor.view().switch_target.as_deref(), Some(BERLIN));
+        // After the first step at the service the target is fixed.
+        assert!(monitor.switch_proceed(Phase::Forward));
+        assert!(!monitor.retarget(DE));
+        monitor.finish_switch(&SwitchResult::Switched);
+        assert_eq!(monitor.view().connected_host, BERLIN);
+        // Not during a connection attempt, not without an operation, not while reconnecting.
+        let mut connecting = monitor_in("clean", false);
+        assert!(!connecting.retarget(BERLIN));
+        connecting.begin_connect(DE).unwrap();
+        assert!(!connecting.retarget(BERLIN));
+        let mut reapplying = connected_to(NL);
+        reapplying.begin_reapply().unwrap();
+        assert!(!reapplying.retarget(BERLIN));
+        // Not after "Disconnect" was requested.
+        let mut stopping = connected_to(NL);
+        stopping.begin_connect(DE).unwrap();
+        assert_eq!(stopping.begin_disconnect(false), DisconnectStart::Deferred);
+        assert!(!stopping.retarget(BERLIN));
+    }
+
+    #[test]
+    fn wechsel_endet_ohne_aufruf_beim_verbundenen_server() {
+        let mut monitor = connected_to(NL);
+        monitor.begin_connect(DE).unwrap();
+        assert!(monitor.abandon_switch(Phrase::key(Key::NoticeBestAlready)));
+        let view = monitor.view();
+        assert_eq!(view.connected_host, NL);
+        assert!(!view.switching && view.can_switch);
+        assert_eq!(view.notice.unwrap().text, Phrase::key(Key::NoticeBestAlready));
+        // Only once, and not after the first step, after "Disconnect" or while reconnecting.
+        assert!(!monitor.abandon_switch(Phrase::key(Key::NoticeBestAlready)));
+        let mut called = connected_to(NL);
+        called.begin_connect(DE).unwrap();
+        assert!(called.switch_proceed(Phase::Forward));
+        assert!(!called.abandon_switch(Phrase::key(Key::NoticeBestAlready)));
+        let mut stopping = connected_to(NL);
+        stopping.begin_connect(DE).unwrap();
+        stopping.begin_disconnect(false);
+        assert!(!stopping.abandon_switch(Phrase::key(Key::NoticeBestAlready)));
+        let mut reapplying = connected_to(NL);
+        reapplying.begin_reapply().unwrap();
+        assert!(!reapplying.abandon_switch(Phrase::key(Key::NoticeBestAlready)));
+        assert!(!monitor_in("clean", false).abandon_switch(Phrase::key(Key::NoticeBestAlready)));
+    }
+
+    #[test]
+    fn jede_gesetzte_meldung_zaehlt_auch_mit_gleichem_text() {
+        let mut monitor = connected_to(BERLIN);
+        let start = monitor.notice_count();
+        assert!(monitor.inform(Phrase::key(Key::NoticeBestAlready)));
+        assert_eq!(monitor.notice_count(), start + 1);
+        assert!(monitor.inform(Phrase::key(Key::NoticeBestAlready)));
+        assert_eq!(monitor.notice_count(), start + 2);
+        // Queries of `/state` and removing the notice do not count.
+        monitor.observe(observed("connected", Some(BERLIN), true));
+        monitor.begin_connect(NL).unwrap();
+        assert_eq!(monitor.view().notice, None);
+        assert_eq!(monitor.notice_count(), start + 2);
+        // A refused attempt counts as soon as its message is set.
+        let mut free = monitor_in("clean", false);
+        let before = free.notice_count();
+        free.begin_connect(DE).unwrap();
+        free.finish_connect(&ConnectResult::NotStarted(Error::NotRunning));
+        assert!(free.view().notice.is_some());
+        assert_eq!(free.notice_count(), before + 1);
+    }
+
+    #[test]
+    fn hinweis_ohne_vorgang() {
+        let mut monitor = connected_to(BERLIN);
+        assert!(monitor.inform(Phrase::key(Key::NoticeBestAlready)));
+        let notice = monitor.view().notice.expect("Hinweis");
+        assert_eq!(notice.text, Phrase::key(Key::NoticeBestAlready));
+        assert_eq!(notice.command, None);
+        // The state stays as it is.
+        assert_eq!(monitor.view().connected_host, BERLIN);
+        // A query of `/state` keeps the notice.
+        monitor.observe(observed("connected", Some(BERLIN), true));
+        assert!(monitor.view().notice.is_some());
+        // The next operation removes it.
+        monitor.begin_connect(NL).unwrap();
+        assert_eq!(monitor.view().notice, None);
+        // During an operation no notice.
+        assert!(!monitor.inform(Phrase::key(Key::NoticeBestUnknown)));
+        assert_eq!(monitor.view().notice, None);
+        // Also without a connection and while blocked.
+        for (code, blocked) in [("clean", false), ("routed", true)] {
+            let mut monitor = monitor_in(code, blocked);
+            assert!(monitor.inform(Phrase::key(Key::NoticeBestUnknown)), "{code}");
+            assert!(monitor.view().notice.is_some(), "{code}");
+            assert!(monitor.view().can_connect, "{code}");
         }
     }
 
@@ -2423,5 +3682,27 @@ mod tests {
         assert!(!free.begin_route(false), "Internet-Sperre in den Einstellungen aus");
         assert!(free.begin_route(true));
         assert!(!free.begin_route(true), "nicht zweimal");
+    }
+
+    /// Feature 012: only results in which the service tried the name count as a failed name.
+    #[test]
+    fn nur_versuchte_namen_gelten_als_gescheitert() {
+        let failed = [
+            ConnectResult::FailedReleased(Error::Timeout),
+            ConnectResult::FailedBlocked(Error::Timeout),
+            ConnectResult::ReleaseFailed(Error::Timeout),
+        ];
+        for result in &failed {
+            assert!(result.name_failed(), "{result:?}");
+        }
+        let not_tried = [
+            ConnectResult::Connected,
+            ConnectResult::NotStarted(Error::Timeout),
+            ConnectResult::Rejected("x".to_owned()),
+            ConnectResult::Untested("0.9.15".to_owned()),
+        ];
+        for result in &not_tried {
+            assert!(!result.name_failed(), "{result:?}");
+        }
     }
 }

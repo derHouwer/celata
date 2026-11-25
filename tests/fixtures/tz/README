@@ -1,0 +1,2 @@
+Test excerpt of the time zone database from the package tzdata-2026e-1.fc44: zone.tab and zone1970.tab unchanged, links.zi holds only the link lines (`L ...`) of tzdata.zi.
+The tz database is in the public domain according to the tz project; these files are test data only and are never read by Celata at run time.

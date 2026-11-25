@@ -4,13 +4,13 @@
 # Maintainer: derHouwer <355941224+derHouwer at users dot noreply dot github dot com>
 
 pkgname=celata
-pkgver=0.8.1
+pkgver=0.9.0
 pkgrel=1
 pkgdesc="Unofficial graphical interface for the hide.me VPN command-line client"
 arch=('x86_64')
 url="https://github.com/derHouwer/celata"
 license=('GPL-3.0-only')
-depends=(fontconfig ttf-font wayland libxkbcommon libglvnd iproute2 systemd hicolor-icon-theme libgcc glibc)
+depends=(fontconfig ttf-font wayland libxkbcommon libglvnd iproute2 systemd polkit hicolor-icon-theme libgcc glibc tzdata)
 makedepends=(cargo)
 optdepends=(
   'hide-client: the hide.me command-line client (AUR), required to connect'
@@ -64,6 +64,9 @@ package() {
   # The unit for the file locations of the AUR package `hide-client` (/usr/bin/hide.me, /etc/hide.me).
   install -Dm0644 packaging/arch/celata-hide.me.service "$pkgdir/usr/lib/systemd/system/celata-hide.me.service"
   install -Dm0644 packaging/sysusers/celata.conf "$pkgdir/usr/lib/sysusers.d/celata.conf"
+  # Lets members of the group celata start the service without a password. The directory gets 0755 root:root,
+  # as in the packages polkit and systemd.
+  install -Dm0644 packaging/polkit/49-celata.rules "$pkgdir/usr/share/polkit-1/rules.d/49-celata.rules"
   install -Dm0644 packaging/desktop/celata.desktop "$pkgdir/usr/share/applications/celata.desktop"
   install -Dm0644 ui/icons/celata.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/celata.svg"
   install -Dm0644 packaging/desktop/io.github.derhouwer.celata.metainfo.xml \

@@ -20,7 +20,7 @@ Feedback, bug reports and ideas are welcome, see [CONTRIBUTING.md](../CONTRIBUTI
   origin of third-party code).
 - The packages are built from the published source code in containers without network access, then
   installed and started once on each supported system (see [Tested on](../README.md#tested-on)).
-- Some principles hold for every version: Celata runs without administrator rights and never asks for a
+- Some principles hold for every version: Celata runs without administrator rights and never sees a
   password; it contains no `unsafe` code; every text exists in all languages (English and German); text and
   background colours keep a contrast of at least 4.5 : 1; nothing is taken from the hide.me client or from
   hide.me.
@@ -29,7 +29,7 @@ Feedback, bug reports and ideas are welcome, see [CONTRIBUTING.md](../CONTRIBUTI
 
 ## The hide.me client
 
-Celata 0.8.1 is tested with version 0.9.14 of the hide.me client. The client does not announce changes of
+Celata 0.9.0 is tested with version 0.9.14 of the hide.me client. The client does not announce changes of
 its control interface, and it silently ignores settings it does not know. Therefore:
 
 - Celata shows a notice when the service reports a version other than the tested one.

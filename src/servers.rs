@@ -6,6 +6,7 @@
 //! The list comes directly from the public API and never from the service: `GET /serverList` would
 //! overwrite its configuration (eventure/hide.client.linux, issue #61).
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::io::{self, Read};
@@ -14,6 +15,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+use crate::continent::Continent;
 use crate::files::{self, unix_seconds};
 use crate::i18n::{self, Key, Language, Phrase};
 use crate::names;
@@ -80,6 +82,48 @@ pub struct Server {
     pub free: bool,
     /// Main entry of a country with several places: hide.me chooses the place itself.
     pub automatic: bool,
+    /// Country name built by Celata because the list has no main entry for a country with several places
+    /// ([`country_host`]); `automatic` is then true as well.
+    pub derived: bool,
+    /// Coordinates from `geo.lat` and `geo.lon`: both present, finite, latitude in −90…90 and longitude in
+    /// −180…180; otherwise `None`.
+    pub position: Option<Position>,
+    /// Flag `no-best`: never chosen as "Best location".
+    pub no_best: bool,
+    /// Continent from `geo.continent`; `None` if missing, not a text or an unknown code, and for built names.
+    pub continent: Option<Continent>,
+}
+
+/// Position on the earth in millionths of a degree (rounded to the nearest whole number). Whole numbers keep
+/// `Server` comparable with `Eq`; a millionth of a degree is about 0.1 m.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Position {
+    pub lat: i32,
+    pub lon: i32,
+}
+
+/// Millionths of a degree per degree.
+const MICRO: f64 = 1_000_000.0;
+
+impl Position {
+    /// Position from degrees, or `None` if a value is not finite or out of range.
+    pub fn from_degrees(lat: f64, lon: f64) -> Option<Self> {
+        let valid =
+            lat.is_finite() && lon.is_finite() && (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon);
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the range check above keeps both values far inside i32"
+        )]
+        valid.then(|| Self {
+            lat: (lat * MICRO).round() as i32,
+            lon: (lon * MICRO).round() as i32,
+        })
+    }
+
+    /// Latitude and longitude in degrees.
+    pub fn degrees(self) -> (f64, f64) {
+        (f64::from(self.lat) / MICRO, f64::from(self.lon) / MICRO)
+    }
 }
 
 impl Server {
@@ -138,6 +182,12 @@ struct RawEntry {
 struct RawGeo {
     city_name: Option<String>,
     country_code: Option<String>,
+    /// Read leniently: a value that is not a number makes only the position unknown, never the whole list
+    /// unreadable.
+    lat: Option<serde_json::Value>,
+    lon: Option<serde_json::Value>,
+    /// Read leniently as well: only a text with a known code counts.
+    continent: Option<serde_json::Value>,
 }
 
 /// Name from the list for the display: without control characters, at most [`MAX_NAME`] characters;
@@ -164,6 +214,16 @@ impl RawEntry {
         let original = non_empty(self.display_name.as_ref())?;
         let city = non_empty(self.geo.as_ref().and_then(|geo| geo.city_name.as_ref()));
         let free = self.tags.iter().any(|tag| tag == "free");
+        let no_best = self.tags.iter().any(|tag| tag == "no-best");
+        let position = self
+            .geo
+            .as_ref()
+            .and_then(|geo| Position::from_degrees(geo.lat.as_ref()?.as_f64()?, geo.lon.as_ref()?.as_f64()?));
+        let continent = self
+            .geo
+            .as_ref()
+            .and_then(|geo| geo.continent.as_ref()?.as_str())
+            .and_then(Continent::from_api);
         let automatic = top_level && !self.children.is_empty();
         let label = if automatic {
             ServerLabel::Automatic
@@ -183,6 +243,10 @@ impl RawEntry {
             host: service_host(self.hostname.as_deref()?)?,
             free,
             automatic,
+            derived: false,
+            position,
+            no_best,
+            continent,
         })
     }
 }
@@ -228,16 +292,109 @@ pub fn parse_list(content: &[u8]) -> Result<Vec<Country>, InvalidList> {
         }
     }
     countries.retain(|country| !country.servers.is_empty());
+    add_derived(&mut countries);
     Ok(countries)
+}
+
+/// Country name of hide.me for a country code in the form of the service: the code in lower case with
+/// `.hideservers.net`, like the main entries of the list after [`service_host`] (`de-v4.hideservers.net` →
+/// `de.hideservers.net`). The only exception is the United Kingdom, which hide.me calls `uk`. `None` if the
+/// code does not give a permitted host name.
+pub fn country_host(code: &str) -> Option<String> {
+    if code.len() != 2 || !code.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        return None;
+    }
+    let short = match code.to_ascii_lowercase().as_str() {
+        "gb" => "uk".to_owned(),
+        other => other.to_owned(),
+    };
+    let host = format!("{short}{HOST_SUFFIX}");
+    is_valid_host(&host).then_some(host)
+}
+
+/// Adds the country name built by [`country_host`] at the front of every country with several servers
+/// and without a main entry, so that the country row stands for "Automatic" like everywhere else (on
+/// 2026-11-19 only Finland, whose main entry names the same server as "Helsinki #2"). Not if the name is
+/// already a server of the country. The name is not queried at startup; a failed attempt removes it again
+/// ([`drop_derived`]).
+fn add_derived(countries: &mut [Country]) {
+    for country in countries {
+        if country.servers.len() < 2 || country.servers.iter().any(|server| server.automatic) {
+            continue;
+        }
+        let Some(host) = country_host(&country.code) else {
+            continue;
+        };
+        if country.servers.iter().any(|server| server.host == host) {
+            continue;
+        }
+        country.servers.insert(
+            0,
+            Server {
+                label: ServerLabel::Automatic,
+                original: country.original.clone(),
+                city: None,
+                host,
+                free: false,
+                automatic: true,
+                derived: true,
+                position: None,
+                no_best: false,
+                continent: None,
+            },
+        );
+    }
+}
+
+/// Removes built country names whose host is in `failed`: hide.me did not know them during this session.
+/// Servers from the list stay, even if their host is in `failed`.
+pub fn drop_derived(countries: &mut [Country], failed: &BTreeSet<String>) {
+    for country in countries {
+        country
+            .servers
+            .retain(|server| !(server.derived && failed.contains(&server.host)));
+    }
+}
+
+/// Is `host` a country name built by Celata in `countries`?
+pub fn is_derived(countries: &[Country], host: &str) -> bool {
+    countries
+        .iter()
+        .flat_map(|country| &country.servers)
+        .any(|server| server.derived && server.host == host)
+}
+
+/// A country found by [`search_marked`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    /// The country with the servers that matched; all of them if the country name matched.
+    pub country: Country,
+    /// The country name matched (otherwise only places or servers did).
+    pub by_country: bool,
 }
 
 /// Searches case-insensitively in the names of all languages and in the name from the API. If the
 /// country name matches, the whole country stays, otherwise only the servers whose name or city
 /// matches. An empty search term shows everything.
 pub fn search(countries: &[Country], query: &str) -> Vec<Country> {
+    search_marked(countries, query)
+        .into_iter()
+        .map(|found| found.country)
+        .collect()
+}
+
+/// Like [`search`], but remembers for every country whether its name matched. An empty search term
+/// shows everything, marked as matched by the country name (nothing is unfolded by the search then).
+pub fn search_marked(countries: &[Country], query: &str) -> Vec<Found> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
-        return countries.to_vec();
+        return countries
+            .iter()
+            .map(|country| Found {
+                country: country.clone(),
+                by_country: true,
+            })
+            .collect();
     }
     let matches = |text: &str| text.to_lowercase().contains(&query);
     countries
@@ -248,7 +405,10 @@ pub fn search(countries: &[Country], query: &str) -> Vec<Country> {
                     .into_iter()
                     .any(|language| matches(&country.name(language)))
             {
-                return Some(country.clone());
+                return Some(Found {
+                    country: country.clone(),
+                    by_country: true,
+                });
             }
             let servers: Vec<Server> = country
                 .servers
@@ -261,9 +421,12 @@ pub fn search(countries: &[Country], query: &str) -> Vec<Country> {
                 })
                 .cloned()
                 .collect();
-            (!servers.is_empty()).then(|| Country {
-                servers,
-                ..country.clone()
+            (!servers.is_empty()).then(|| Found {
+                country: Country {
+                    servers,
+                    ..country.clone()
+                },
+                by_country: false,
             })
         })
         .collect()
@@ -420,6 +583,8 @@ mod tests {
     use std::time::UNIX_EPOCH;
 
     const FIXTURE: &str = include_str!("../tests/fixtures/servers.json");
+    /// The real list of 2026-11-19 (public, without access data).
+    const LIST_2026_11_19: &[u8] = include_bytes!("../tests/fixtures/servers-2026-11-19.json");
 
     /// Names from the public list are shown without control characters and bounded; a country code that
     /// is not two letters discards the entry.
@@ -575,7 +740,9 @@ mod tests {
         sort_by_name(&mut countries, Language::De);
         let names: Vec<_> = countries.iter().map(|country| country.name(Language::De)).collect();
         assert_eq!(names, vec!["Finnland", "Italien", "Österreich", "Schweiz"]);
-        assert_eq!(labels(&countries[0]), vec!["Helsinki #1", "Helsinki #2"]);
+        // Celata builds the missing country name (feature 012).
+        assert_eq!(labels(&countries[0]), vec!["Automatisch", "Helsinki #1", "Helsinki #2"]);
+        assert!(countries[0].servers[0].derived);
         assert_eq!(labels(&countries[1]), vec!["Automatisch", "Mailand"]);
         assert_eq!(labels(&countries[2]), vec!["Wien"]);
         assert_eq!(labels(&countries[3]), vec!["Kostenloser Server"]);
@@ -838,5 +1005,283 @@ mod tests {
             assert_eq!(result[0].servers.len(), 1, "{query}");
             assert_eq!(result[0].servers[0].host, "milan.hideservers.net", "{query}");
         }
+    }
+
+    // --- Coordinates and flags (feature 013) ---
+
+    fn server<'a>(countries: &'a [Country], host: &str) -> &'a Server {
+        countries
+            .iter()
+            .flat_map(|country| &country.servers)
+            .find(|server| server.host == host)
+            .unwrap_or_else(|| panic!("{host} fehlt"))
+    }
+
+    #[test]
+    fn koordinaten_aus_der_echten_liste() {
+        let countries = real_list();
+        let (lat, lon) = server(&countries, "berlin.hideservers.net").position.unwrap().degrees();
+        assert!((lat - 52.52).abs() < 1e-6 && (lon - 13.405).abs() < 1e-6, "{lat} {lon}");
+        // Country names ("Automatic") carry no coordinates in the list.
+        assert_eq!(server(&countries, "de.hideservers.net").position, None);
+        // Built country name.
+        let finland = server(&countries, "fi.hideservers.net");
+        assert!(finland.derived);
+        assert_eq!(finland.position, None);
+        assert!(!finland.no_best);
+    }
+
+    #[test]
+    fn kennzeichen_no_best() {
+        let countries = real_list();
+        let free_fi = server(&countries, "free-fi.hideservers.net");
+        assert!(free_fi.free && free_fi.no_best);
+        assert_eq!(free_fi.name(Language::De), "Helsinki");
+        let free_uk = server(&countries, "free-uk.hideservers.net");
+        assert!(free_uk.free && free_uk.no_best);
+        assert_eq!(free_uk.name(Language::De), "Kostenloser Server");
+        assert!(!server(&countries, "berlin.hideservers.net").no_best);
+        let flagged: Vec<&str> = countries
+            .iter()
+            .flat_map(|country| &country.servers)
+            .filter(|server| server.no_best)
+            .map(|server| server.host.as_str())
+            .collect();
+        assert_eq!(flagged, ["free-fi.hideservers.net", "free-uk.hideservers.net"]);
+    }
+
+    #[test]
+    fn ungueltige_koordinaten_ergeben_keinen_ort() {
+        let list = br#"[
+          {"hostname": "a-v4.hideservers.net", "displayName": "A", "geo": {"countryCode": "AA", "lat": 91, "lon": 10}},
+          {"hostname": "b-v4.hideservers.net", "displayName": "B", "geo": {"countryCode": "BB", "lat": 10, "lon": -181}},
+          {"hostname": "c-v4.hideservers.net", "displayName": "C", "geo": {"countryCode": "CC", "lat": 10}},
+          {"hostname": "d-v4.hideservers.net", "displayName": "D", "geo": {"countryCode": "DD", "lat": "NaN", "lon": 5}},
+          {"hostname": "e-v4.hideservers.net", "displayName": "E", "geo": {"countryCode": "EE", "lat": 52.5000004, "lon": -0.0000006}},
+          {"hostname": "f-v4.hideservers.net", "displayName": "F", "geo": {"countryCode": "FF", "lat": -90, "lon": 180}}
+        ]"#;
+        let countries = parse_list(list).unwrap();
+        // Every server stays in the list.
+        assert_eq!(countries.len(), 6);
+        for host in ["a", "b", "c", "d"] {
+            assert_eq!(
+                server(&countries, &format!("{host}.hideservers.net")).position,
+                None,
+                "{host}"
+            );
+        }
+        assert_eq!(
+            server(&countries, "e.hideservers.net").position,
+            Some(Position {
+                lat: 52_500_000,
+                lon: -1
+            })
+        );
+        assert_eq!(
+            server(&countries, "f.hideservers.net").position,
+            Some(Position {
+                lat: -90_000_000,
+                lon: 180_000_000
+            })
+        );
+        assert_eq!(Position::from_degrees(f64::NAN, 0.0), None);
+        assert_eq!(Position::from_degrees(0.0, f64::INFINITY), None);
+    }
+
+    // --- Built country names (feature 012) ---
+
+    fn real_list() -> Vec<Country> {
+        parse_list(LIST_2026_11_19).unwrap()
+    }
+
+    #[test]
+    fn laendername_nach_dem_muster_von_hide_me() {
+        assert_eq!(country_host("FI").as_deref(), Some("fi.hideservers.net"));
+        assert_eq!(country_host("GB").as_deref(), Some("uk.hideservers.net"));
+        assert_eq!(country_host("DE").as_deref(), Some("de.hideservers.net"));
+        assert_eq!(country_host("de").as_deref(), Some("de.hideservers.net"));
+        for code in ["", "D", "DEU", "D1", "D-", "Ä"] {
+            assert_eq!(country_host(code), None, "{code}");
+        }
+    }
+
+    #[test]
+    fn echte_liste_hat_57_laender_und_elf_mit_mehreren_orten() {
+        let countries = real_list();
+        assert_eq!(countries.len(), 57);
+        let mut several: Vec<&str> = countries
+            .iter()
+            .filter(|country| country.servers.len() > 1)
+            .map(|country| country.code.as_str())
+            .collect();
+        several.sort_unstable();
+        assert_eq!(
+            several,
+            ["AU", "CA", "CH", "DE", "ES", "FI", "FR", "GB", "IT", "NL", "US"]
+        );
+        // Every country with several places has exactly one "Automatic" at the front.
+        for country in countries.iter().filter(|country| country.servers.len() > 1) {
+            assert!(country.servers[0].automatic, "{}", country.code);
+            assert_eq!(
+                country.servers.iter().filter(|server| server.automatic).count(),
+                1,
+                "{}",
+                country.code
+            );
+        }
+    }
+
+    #[test]
+    fn finnland_bekommt_den_gebildeten_laendernamen() {
+        let countries = real_list();
+        let finland = country(&countries, "FI");
+        let first = &finland.servers[0];
+        assert_eq!(first.host, "fi.hideservers.net");
+        assert!(first.automatic && first.derived);
+        assert_eq!(first.label, ServerLabel::Automatic);
+        assert_eq!(
+            hosts(finland),
+            [
+                "fi.hideservers.net",
+                "fi1.hideservers.net",
+                "fi2.hideservers.net",
+                "free-fi.hideservers.net"
+            ]
+        );
+        // Germany keeps its own main entry and gets no second one.
+        let germany = country(&countries, "DE");
+        let automatic: Vec<&Server> = germany.servers.iter().filter(|server| server.automatic).collect();
+        assert_eq!(automatic.len(), 1);
+        assert_eq!(automatic[0].host, "de.hideservers.net");
+        assert!(!automatic[0].derived);
+        // Only Finland has a built name.
+        let derived: Vec<&str> = countries
+            .iter()
+            .flat_map(|country| &country.servers)
+            .filter(|server| server.derived)
+            .map(|server| server.host.as_str())
+            .collect();
+        assert_eq!(derived, ["fi.hideservers.net"]);
+        assert!(is_derived(&countries, "fi.hideservers.net"));
+        assert!(!is_derived(&countries, "de.hideservers.net"));
+    }
+
+    #[test]
+    fn kein_gebildeter_name_bei_einem_server_oder_vorhandenem_namen() {
+        let list = br#"[
+          {"hostname": "at-v4.hideservers.net", "displayName": "Austria", "geo": {"cityName": "Vienna", "countryCode": "AT"}},
+          {"hostname": "se1-v4.hideservers.net", "displayName": "Sweden", "geo": {"cityName": "Stockholm", "countryCode": "SE"}},
+          {"hostname": "se-v4.hideservers.net", "displayName": "Sweden", "geo": {"cityName": "Malmo", "countryCode": "SE"}}
+        ]"#;
+        let countries = parse_list(list).unwrap();
+        assert!(
+            countries
+                .iter()
+                .flat_map(|country| &country.servers)
+                .all(|server| !server.derived)
+        );
+        assert_eq!(
+            hosts(country(&countries, "SE")),
+            ["se1.hideservers.net", "se.hideservers.net"]
+        );
+    }
+
+    #[test]
+    fn gescheiterter_gebildeter_name_faellt_weg() {
+        let mut countries = real_list();
+        let failed: BTreeSet<String> = ["fi.hideservers.net".to_owned(), "de.hideservers.net".to_owned()].into();
+        drop_derived(&mut countries, &failed);
+        assert_eq!(
+            hosts(country(&countries, "FI")),
+            ["fi1.hideservers.net", "fi2.hideservers.net", "free-fi.hideservers.net"]
+        );
+        // A real main entry stays, even if its host is in the set.
+        assert_eq!(country(&countries, "DE").servers[0].host, "de.hideservers.net");
+        assert!(!is_derived(&countries, "fi.hideservers.net"));
+    }
+
+    #[test]
+    fn markierte_suche_nach_land_und_ort() {
+        let countries = real_list();
+        for query in ["deutsch", "germany"] {
+            let found = search_marked(&countries, query);
+            assert_eq!(found.len(), 1, "{query}");
+            assert_eq!(found[0].country.code, "DE");
+            assert!(found[0].by_country, "{query}");
+            assert_eq!(found[0].country.servers, country(&countries, "DE").servers);
+        }
+        // "frank" also matches the country name "Frankreich" (France): France whole, Germany only Frankfurt.
+        let found = search_marked(&countries, "frank");
+        let codes: Vec<&str> = found.iter().map(|found| found.country.code.as_str()).collect();
+        assert_eq!(codes.len(), 2, "{codes:?}");
+        let france = found.iter().find(|found| found.country.code == "FR").unwrap();
+        assert!(france.by_country);
+        let germany = found.iter().find(|found| found.country.code == "DE").unwrap();
+        assert!(!germany.by_country);
+        assert_eq!(
+            hosts(&germany.country),
+            [
+                "frankfurt1.hideservers.net",
+                "frankfurt2.hideservers.net",
+                "free-de.hideservers.net"
+            ]
+        );
+        // `search` gives the same countries and servers as before.
+        for query in ["", "frank", "deutsch", "helsinki", "automatic", "Atlantis"] {
+            let plain = search(&countries, query);
+            let marked: Vec<Country> = search_marked(&countries, query)
+                .into_iter()
+                .map(|found| found.country)
+                .collect();
+            assert_eq!(plain, marked, "{query}");
+        }
+    }
+
+    // --- Continent from the list (feature 016) ---
+
+    #[test]
+    fn continent_is_read_from_geo() {
+        let list = br#"[
+          {"hostname": "a-v4.hideservers.net", "displayName": "A", "geo": {"countryCode": "AA", "continent": "EU"}},
+          {"hostname": "b-v4.hideservers.net", "displayName": "B", "geo": {"countryCode": "BB", "continent": " oc "}},
+          {"hostname": "c-v4.hideservers.net", "displayName": "C", "geo": {"countryCode": "CC"}},
+          {"hostname": "d-v4.hideservers.net", "displayName": "D", "geo": {"countryCode": "DD", "continent": 5}},
+          {"hostname": "e-v4.hideservers.net", "displayName": "E", "geo": {"countryCode": "EE", "continent": {"x": 1}}},
+          {"hostname": "f-v4.hideservers.net", "displayName": "F", "geo": {"countryCode": "FF", "continent": "AN"}}
+        ]"#;
+        let countries = parse_list(list).unwrap();
+        // Every server stays in the list, whatever the value looks like.
+        assert_eq!(countries.len(), 6);
+        assert_eq!(
+            server(&countries, "a.hideservers.net").continent,
+            Some(Continent::Europe)
+        );
+        assert_eq!(
+            server(&countries, "b.hideservers.net").continent,
+            Some(Continent::Oceania)
+        );
+        for host in ["c", "d", "e", "f"] {
+            assert_eq!(
+                server(&countries, &format!("{host}.hideservers.net")).continent,
+                None,
+                "{host}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_server_of_the_real_list_has_a_continent_except_built_names() {
+        let countries = real_list();
+        let mut places = 0;
+        for server in countries.iter().flat_map(|country| &country.servers) {
+            if server.derived {
+                assert_eq!(server.continent, None, "{}", server.host);
+            } else {
+                assert!(server.continent.is_some(), "{}", server.host);
+                places += 1;
+            }
+        }
+        // The list has 104 servers (the entry of Finland and its place "Helsinki #2" name the same host).
+        assert_eq!(places, 104);
     }
 }

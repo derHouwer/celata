@@ -48,6 +48,7 @@ change. The internet is untrusted; Celata fetches only one public list over HTTP
 | `src/state.rs`, `Monitor` | The state machine. For every failure: does the block stay, or does the window say clearly that it is gone and name the way out? "Disconnect" and "Unblock internet" use `/destroy`; nothing else may. |
 | `src/switch.rs` | Switching servers: disconnect (the block stays), configure, connect, and the way back to the previous server. `/destroy` must never follow on its own. |
 | `src/killswitch.rs` | Recognizing the block from the routing table read with `ip`. Known limitation: if the table cannot be read, the internet counts as free. |
+| `src/unit.rs` | Starting the service through systemd: only `StartUnit` with the job mode `fail`, only for `celata-hide.me.service`, never a stop, restart, enabling or disabling; the password prompt (`AllowInteractiveAuth`) only in `start_unit_interactive`, which only the button "Start service" calls; no program is started, no `sudo`; the group is read from `/proc/self/status` and `/etc/group` without `unsafe`. A start never repeats by itself. |
 | `src/main.rs` | The wiring: threads, locks, and the order in which results reach the window. This file has no automated tests of its own and is the largest one. |
 
 ### What runs as root
@@ -61,6 +62,7 @@ Celata itself runs nothing as root. These files do, at installation time or as p
 | `packaging/rpm/celata.spec` | The Fedora package: the scriptlets `%post` and `%preun`. |
 | `packaging/arch/PKGBUILD`, `packaging/arch/celata.install` | The Arch package. |
 | `packaging/sysusers/celata.conf` | Creates the group. It must not add members. |
+| `packaging/polkit/49-celata.rules` | The rule for polkit: only the action `org.freedesktop.systemd1.manage-units`, only the unit `celata-hide.me.service`, only the verb `start`, only an active session at the computer (`subject.local`, `subject.active`), only members of `celata`, and only the answer `YES`. Anything wider would let members of the group stop the service (and with it lift a block) or start other units without a password. |
 | `packaging/build-packages.sh` | Builds the packages in containers. Base images and the Rust installer are fetched by name over HTTPS, not by checksum; the crates are pinned by `Cargo.lock`, and the builds themselves run without network access. |
 
 ### Input from outside
@@ -96,6 +98,8 @@ you need a hide.me account; keep `sudo systemctl stop celata-hide.me.service` at
 switch can block your connection.
 
 ## What the author's own review found
+
+The review of version 0.8.1 is described first, the review of the changes in version 0.9.0 after it.
 
 All hand-written code of version 0.8.1 was reviewed file by file from three angles: clean code, outdated
 elements, and security. The review was done by the author with automated tools and an AI assistant.
@@ -147,6 +151,27 @@ Not covered by the author's review, or only partly:
 - X11 beyond "the window appears".
 - The hide.me client itself, and the generated Slint code.
 - Whether the English comments, translated from German for this release, say everywhere what the code does.
+
+### The review of version 0.9.0
+
+The changes since 0.8.1 were reviewed for security, again with automated tools and an AI assistant, in seven
+areas: the rule for polkit and the start of the service (`packaging/polkit/49-celata.rules`, `src/unit.rs`, the
+packages); the setup script; the use of the session bus (`src/presence.rs`, `src/notify.rs`, `src/instance.rs`,
+the menu in `ui/tray.slint`); the check for new versions (`src/update.rs`); the entry for the start at login and
+the desktop entry (`src/autostart.rs`, `src/desktop.rs`); the command line (`src/cli.rs`, `src/unblock.rs`); and
+the third-party libraries that came with it. Files that read data from the system or from the list of servers
+(`src/best.rs`, `src/zone.rs`, `src/continent.rs`, `src/favorites.rs`) were read for limits and crashes.
+
+Result: no critical, high or medium finding. One low finding was fixed: after an update of the package while Celata
+was running, the path of the program carried the suffix " (deleted)" and could end up in the entry for the start at
+login. Two notes need no action: a program of the same user on the session bus can claim the name of Celata, imitate
+the system tray or trigger the entries of the menu, which a program of that user (in the group `celata`) can do
+through the control socket anyway; and the rule for polkit applies only to calls that name the unit and the verb
+`start`.
+
+The exceptions for the tools (`cargo audit`, `cargo deny`) were checked again: all are notices about crates that
+are no longer maintained, none reports a vulnerability. `zvariant`, `zbus_names` and `zvariant_derive` also come in
+through `zbus` 5, which Celata uses for the session and the system bus; only `zbus` 6 replaces them.
 
 ## How to report findings
 

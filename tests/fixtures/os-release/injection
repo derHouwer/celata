@@ -1,0 +1,4 @@
+# A file with commands in it: it must be read as text and never run.
+ID=$(touch /tmp/celata-os-release-was-run)
+VERSION_ID=`touch /tmp/celata-os-release-was-run`
+PRETTY_NAME="a ; touch /tmp/celata-os-release-was-run"

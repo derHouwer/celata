@@ -12,6 +12,7 @@
 
 use std::io;
 
+use crate::best::MAX_TRIES;
 use crate::daemon::{Client, Error};
 use crate::i18n::{Key, Phrase};
 use crate::settings::{Class, Ledger, Settings, untested_notice};
@@ -76,6 +77,22 @@ fn service_gone(error: &Error) -> bool {
 }
 
 impl SwitchResult {
+    /// The service tried the new name and it failed, or the name has no address. Only then can a name built
+    /// by Celata (`servers::country_host`) count as unknown to hide.me.
+    pub fn name_failed(&self) -> bool {
+        // Deliberately without `_`: a new result is meant to cause a compile error here.
+        match self {
+            Self::Returned(_) | Self::Stranded(_) | Self::Unreachable => true,
+            Self::Switched
+            | Self::Refused
+            | Self::NotStarted(_)
+            | Self::Unclear(_)
+            | Self::Stopped(_)
+            | Self::Rejected(_)
+            | Self::Untested(_) => false,
+        }
+    }
+
     /// Notice after the switch from `from` to `to` (hosts), or `None` if none is needed.
     pub fn notice(&self, from: &str, to: &str) -> Option<Notice> {
         let (from, to) = (server_label(from), server_label(to));
@@ -94,6 +111,20 @@ impl SwitchResult {
         };
         Some(Notice { text, command: None })
     }
+}
+
+/// Target of a switch through "Best location": checks at most [`MAX_TRIES`] hosts of the order one
+/// after another with `resolves` and returns the first one with an address, and the hosts without an
+/// address before it (they leave "Best location" for this session). A further host is never asked.
+pub fn first_reachable(hosts: &[String], resolves: impl Fn(&str) -> bool) -> (Option<String>, Vec<String>) {
+    let mut without_address = Vec::new();
+    for host in hosts.iter().take(MAX_TRIES) {
+        if resolves(host) {
+            return (Some(host.clone()), without_address);
+        }
+        without_address.push(host.clone());
+    }
+    (None, without_address)
 }
 
 /// Checks the version of the service before settings that differ from the defaults are sent.
@@ -274,5 +305,74 @@ pub fn run_reconnect(
     match back {
         Ok(()) => SwitchResult::Returned(failure),
         Err(error) => SwitchResult::Stranded(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    fn hosts(count: usize) -> Vec<String> {
+        (1..=count).map(|index| format!("h{index}.hideservers.net")).collect()
+    }
+
+    /// Runs `first_reachable` with a check that answers yes only for `reachable` and records every question.
+    fn ask(hosts: &[String], reachable: &[&str]) -> ((Option<String>, Vec<String>), Vec<String>) {
+        let asked = RefCell::new(Vec::new());
+        let result = first_reachable(hosts, |host| {
+            asked.borrow_mut().push(host.to_owned());
+            reachable.contains(&host)
+        });
+        (result, asked.into_inner())
+    }
+
+    #[test]
+    fn erster_erreichbarer_kandidat() {
+        let list = hosts(4);
+        let ((found, missing), asked) = ask(&list, &["h1.hideservers.net", "h2.hideservers.net"]);
+        assert_eq!(found.as_deref(), Some("h1.hideservers.net"));
+        assert!(missing.is_empty());
+        assert_eq!(asked.len(), 1);
+        let ((found, missing), asked) = ask(&list, &["h2.hideservers.net"]);
+        assert_eq!(found.as_deref(), Some("h2.hideservers.net"));
+        assert_eq!(missing, ["h1.hideservers.net"]);
+        assert_eq!(asked.len(), 2);
+    }
+
+    #[test]
+    fn hoechstens_drei_namen() {
+        let list = hosts(4);
+        // The fourth would have an address, but is never asked.
+        let ((found, missing), asked) = ask(&list, &["h4.hideservers.net"]);
+        assert_eq!(found, None);
+        assert_eq!(missing, hosts(3));
+        assert_eq!(asked, hosts(3));
+        let ((found, missing), asked) = ask(&[], &[]);
+        assert_eq!(found, None);
+        assert!(missing.is_empty() && asked.is_empty());
+    }
+
+    /// Feature 012: only results in which the new name was tried or had no address count as a failed name.
+    #[test]
+    fn nur_versuchte_namen_gelten_als_gescheitert() {
+        for result in [
+            SwitchResult::Returned(Error::Timeout),
+            SwitchResult::Stranded(Error::Timeout),
+            SwitchResult::Unreachable,
+        ] {
+            assert!(result.name_failed(), "{result:?}");
+        }
+        for result in [
+            SwitchResult::Switched,
+            SwitchResult::Refused,
+            SwitchResult::NotStarted(Error::Timeout),
+            SwitchResult::Unclear(Error::Timeout),
+            SwitchResult::Stopped(Ok(())),
+            SwitchResult::Rejected("x".to_owned()),
+            SwitchResult::Untested("0.9.15".to_owned()),
+        ] {
+            assert!(!result.name_failed(), "{result:?}");
+        }
     }
 }

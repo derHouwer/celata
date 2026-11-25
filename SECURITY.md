@@ -24,7 +24,7 @@ In scope:
 
 - Celata itself (the program in this repository),
 - the service unit `celata-hide.me.service`,
-- the packages and the build script in `packaging/`.
+- the packages, the setup script and the build script in `packaging/`.
 
 Out of scope:
 
@@ -34,8 +34,13 @@ Out of scope:
 
 ## Security model
 
-- **Celata runs without administrator rights.** It never asks for a password and never runs anything as
-  root.
+- **Celata runs without administrator rights.** It never sees a password and never runs anything as root. Only
+  when you click "Start service" (shown when the rule for polkit below is missing) does the system itself ask for
+  the administrator password, through the password agent of your desktop.
+- **The setup script `celata-setup.sh`** runs as your user and uses `sudo` for single commands only. It checks
+  the package it installs, and itself, against `SHA256SUMS`; the checksums are not a signature, so they do not
+  prove who built the files. It never reads your Access-Token, never changes DNS settings, and refuses to use a
+  hide.me client at a place that others can change, because the service runs it as root.
 - **The VPN is the hide.me client**, started by systemd as root in its "service" mode
   (`celata-hide.me.service`). In this mode it waits for commands and never connects on its own.
 - **Celata talks to the service only through a local socket**, `/run/hide.me/control.sock` (owner `root`,
@@ -45,6 +50,12 @@ Out of scope:
 - **Network access of Celata itself** is limited to public lists of hide.me over HTTPS (the server list)
   and to name lookups of server names. Celata contains no telemetry and never contacts the donation page; the
   donation button only hands a fixed link to your browser.
+- **Favorite locations** are stored as host names in the local settings file (mode `0600`) and are never
+  sent to the service or the network.
+- **The icon in the system tray** shows the state and its hover text names it, for example "Celata –
+  Connected" or, while switching, the target location. Every program of your own account can read this over
+  the session bus, also without the group `celata`. It never contains host names or addresses. A click on
+  the icon only brings the window back.
 
 ### The group `celata`
 
@@ -57,11 +68,23 @@ account. Such a program can also make the service, which runs as root, overwrite
 content of `resolv.conf`, by choosing where the service keeps its backup of that file. Celata itself only
 accepts a location in `/run/hide.me`.
 
+Celata starts the service itself when it is not running, so the service now usually runs as long as Celata
+runs. A rule for polkit (`49-celata.rules`, installed with the packages) lets members of the group start this one
+service without a password, in an active session directly at this computer. **Every program of a member of the
+group can therefore start the service without a password, and then control it as described above.** The rule
+allows only starting: stopping, restarting, enabling or disabling the service, and every other unit, keep the
+usual rules of the system and need the administrator password.
+
 This is the price for running Celata without administrator rights. To keep the risk small:
 
 - Add only your own account to the group, never accounts of other people or of services.
-- Start the service only when you need it. If you enable it to start with the computer, the socket is
-  reachable for the group all the time.
+- If the service should run only now and then, turn off "Start at login" in Celata, quit Celata and stop the
+  service with `sudo systemctl stop celata-hide.me.service`. If you enable the service to start with the
+  computer, the socket is reachable for the group all the time.
+- If no program should start the service without a password, remove the rule (command in
+  [docs/manual-setup.md](docs/manual-setup.md), step 4; with a package, put an empty file with the same name in
+  `/etc/polkit-1/rules.d/`). Celata then offers only the button "Start service", which asks for the
+  administrator password.
 - Leave the group when you stop using Celata: `sudo gpasswd -d "$USER" celata`.
 
 The service can write only to the directory of the hide.me client, to `/etc`, to `/run/hide.me` and to the
@@ -73,8 +96,11 @@ system replaces that file whenever the network changes, and the client could the
 
 Version 0.8.1 has been through a structured self-review of all hand-written code (clean code, outdated
 elements, security) with automated tools and an AI assistant; every finding was fixed or is listed as
-deferred. Details and the sensitive places of the code are described in
-[docs/REVIEW-GUIDE.md](docs/REVIEW-GUIDE.md).
+deferred. The changes since then (version 0.9.0) have been through a security review of their own, both with
+automated tools and an AI assistant: the rule for polkit and the start of the service, the setup script, the use
+of the session bus (menu, notifications, a second start), the check for new versions, the entry for the start
+at login, the command line and the new third-party libraries. Details and the sensitive places of the code are
+described in [docs/REVIEW-GUIDE.md](docs/REVIEW-GUIDE.md).
 
 Every change is checked with `cargo test`, `cargo clippy`, `cargo fmt --check`, `cargo audit` and
 `cargo deny`. Hand-written code forbids `unsafe`.

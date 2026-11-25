@@ -1,0 +1,430 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 derHouwer
+
+// Icon of Celata in the system tray. It shows the connection state in colour; a left click brings the window
+// back, a right click opens the menu with the main actions, favourites, locations, "About Celata" and "Quit".
+// Every choice is decided by Rust in the state at the time of the choice.
+//
+// Rust sets picture, hover text and every text of the menu: the component shares no globals with the window, so
+// neither `Theme` nor `@tr` reach it. The built-in properties `icon` and `tooltip` are not visible from Rust,
+// hence the two properties that feed them. `visible` is switched with `show()` and `hide()`.
+//
+// Slint passes neither `checked` nor icons of entries to the system tray under Linux; Rust therefore puts "✓ "
+// in front of the connected location and `checked` is set for a later Slint version.
+
+// A location: favourite, place of a country, streaming server.
+export struct TrayPlace {
+    label: string,
+    host: string,
+    enabled: bool,
+    current: bool,
+}
+
+// A country: one entry, or with `places` a submenu ("Automatic" first, then the places).
+export struct TrayCountry {
+    label: string,
+    host: string,
+    enabled: bool,
+    current: bool,
+    places: [TrayPlace],
+}
+
+// A section of the countries in the order of the list: first countries with one location, then countries with
+// several. One loop builds either entries or submenus, never both; alternating sections keep the order.
+export struct TraySlot {
+    singles: [TrayCountry],
+    groups: [TrayCountry],
+}
+
+// A continent: a submenu whose countries are split into sections like a list of countries.
+export struct TrayContinent {
+    label: string,
+    slots: [TraySlot],
+}
+
+export component CelataTray inherits SystemTrayIcon {
+    // Logo in the colour of the state, a pixel image: the system tray takes no SVG.
+    in property <image> state-icon;
+    // "Celata – <short state>", without host names or addresses.
+    in property <string> state-tooltip;
+    icon: root.state-icon;
+    tooltip: root.state-tooltip;
+    title: "Celata";
+
+    in property <string> show-label;
+    // Short state like the sidebar; never selectable.
+    in property <string> status-label;
+    in property <string> main-label;
+    in property <bool> main-enabled;
+    in property <string> best-label;
+    in property <bool> best-enabled;
+    in property <bool> side-shown;
+    in property <string> side-label;
+    in property <string> favorites-label;
+    in property <[TrayPlace]> favorites;
+    in property <string> no-favorites-label;
+    in property <string> favorite-toggle-label;
+    in property <bool> favorite-toggle-enabled;
+    in property <string> locations-label;
+    // Empty, or a note instead of the countries while the list is loading or missing.
+    in property <string> locations-note;
+    in property <string> best-location-label;
+    // The continents in the fixed order, each with as many sections as `look::MENU_SLOTS`.
+    in property <[TrayContinent]> continents;
+    in property <string> streaming-label;
+    in property <[TrayPlace]> streaming;
+    // Empty: no entry about a new version.
+    in property <string> update-label;
+    in property <string> about-label;
+    in property <string> quit-label;
+
+    // Left click on the icon: bring the window back.
+    callback activate();
+    clicked => {
+        root.activate();
+    }
+
+    callback show-window();
+    callback main-action();
+    callback connect-best();
+    callback side-action();
+    // A location; "best" for "Best location".
+    callback choose(string);
+    callback toggle-favorite();
+    callback open-update();
+    callback about();
+    callback quit();
+
+    Menu {
+        MenuItem {
+            title: root.show-label;
+            activated => {
+                root.show-window();
+            }
+        }
+        MenuSeparator { }
+        MenuItem {
+            title: root.status-label;
+            enabled: false;
+        }
+        MenuSeparator { }
+        MenuItem {
+            title: root.main-label;
+            enabled: root.main-enabled;
+            activated => {
+                root.main-action();
+            }
+        }
+        MenuItem {
+            title: root.best-label;
+            enabled: root.best-enabled;
+            activated => {
+                root.connect-best();
+            }
+        }
+        if root.side-shown: MenuItem {
+            title: root.side-label;
+            activated => {
+                root.side-action();
+            }
+        }
+        MenuSeparator { }
+        Menu {
+            title: root.favorites-label;
+            for f in root.favorites: MenuItem {
+                title: f.label;
+                enabled: f.enabled;
+                activated => {
+                    root.choose(f.host);
+                }
+            }
+            if root.favorites.length == 0: MenuItem {
+                title: root.no-favorites-label;
+                enabled: false;
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: root.favorite-toggle-label;
+                enabled: root.favorite-toggle-enabled;
+                activated => {
+                    root.toggle-favorite();
+                }
+            }
+        }
+        Menu {
+            title: root.locations-label;
+            if root.locations-note != "": MenuItem {
+                title: root.locations-note;
+                enabled: false;
+            }
+            if root.locations-note == "": MenuItem {
+                title: root.best-location-label;
+                enabled: root.best-enabled;
+                activated => {
+                    root.choose("best");
+                }
+            }
+            for k in root.continents: Menu {
+                title: k.label;
+                for c in k.slots[0].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[0].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[1].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[1].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[2].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[2].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[3].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[3].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[4].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[4].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[5].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[5].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[6].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[6].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[7].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[7].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[8].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[8].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[9].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[9].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[10].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[10].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+                for c in k.slots[11].singles: MenuItem {
+                    title: c.label;
+                    enabled: c.enabled;
+                    checked: c.current;
+                    activated => {
+                        root.choose(c.host);
+                    }
+                }
+                for c in k.slots[11].groups: Menu {
+                    title: c.label;
+                    for p in c.places: MenuItem {
+                        title: p.label;
+                        enabled: p.enabled;
+                        checked: p.current;
+                        activated => {
+                            root.choose(p.host);
+                        }
+                    }
+                }
+            }
+            if root.streaming.length > 0: Menu {
+                title: root.streaming-label;
+                for s in root.streaming: MenuItem {
+                    title: s.label;
+                    enabled: s.enabled;
+                    checked: s.current;
+                    activated => {
+                        root.choose(s.host);
+                    }
+                }
+            }
+        }
+        MenuSeparator { }
+        if root.update-label != "": MenuItem {
+            title: root.update-label;
+            activated => {
+                root.open-update();
+            }
+        }
+        MenuItem {
+            title: root.about-label;
+            activated => {
+                root.about();
+            }
+        }
+        MenuItem {
+            title: root.quit-label;
+            activated => {
+                root.quit();
+            }
+        }
+    }
+}

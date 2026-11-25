@@ -190,6 +190,8 @@ pub(super) fn text(key: Key) -> &'static str {
              Schutz. Warte kurz oder hebe die Sperre auf. Zum Aufheben klickst du auf das rote Feld rechts im \
              Knopf unten."
         }
+        Key::StateConnectingToTitle => "Verbinde mit {0} …",
+        Key::StateConnectingBlockedToTitle => "Verbinde mit {0}, Internet gesperrt",
         Key::StateConnectedTitle => "Verbunden",
         Key::StateConnectedText => "Dein Datenverkehr läuft geschützt über den VPN-Server.",
         Key::StateDisconnectingTitle => "Wird getrennt …",
@@ -350,6 +352,19 @@ pub(super) fn text(key: Key) -> &'static str {
         Key::AutomaticPlace => "Automatisch, hide.me wählt den Ort",
         Key::StreamingPlace => "Streaming",
         Key::LocationChoice => "{0}, {1}",
+        Key::ListHeadingFavorites => "Favoriten",
+        Key::ListHeadingAll => "Alle Standorte",
+        Key::TargetLabel => "{0} ({1})",
+        // --- Best location (best.rs, look.rs) ---
+        Key::BestName => "Bester Standort",
+        Key::BestHint => "Automatisch, Celata wählt den Standort",
+        Key::BestChosen => "Gewählt: {0}",
+        Key::NoticeBestAlready => "Bereits mit dem besten Standort verbunden.",
+        Key::NoticeBestUnknown => "Bester Standort lässt sich nicht ermitteln, bitte einen Standort wählen.",
+        Key::NoticeBestLoading => "Die Standorte werden noch geladen. Bitte gleich noch einmal versuchen.",
+        Key::NoticeBestNoList => {
+            "Es sind keine Standorte geladen. Bitte die Liste neu laden oder später einen Standort wählen."
+        }
 
         // --- Main button (look.rs) ---
         Key::ButtonConnect => "Verbinde VPN",
@@ -365,6 +380,98 @@ pub(super) fn text(key: Key) -> &'static str {
         // --- Public address (look.rs) ---
         Key::ExternalIpAsking => "wird ermittelt …",
         Key::ExternalIpFailed => "nicht ermittelbar",
+        Key::TrayTooltip => "Celata – {0}",
+        // --- Tray menu (look.rs, feature 014) ---
+        Key::TrayShow => "Celata anzeigen",
+        Key::TrayBest => "Mit bestem Standort verbinden",
+        Key::TrayFavorites => "Favoriten",
+        Key::TrayNoFavorites => "Keine Favoriten",
+        Key::TrayFavoriteAdd => "Aktuellen Standort zu Favoriten hinzufügen",
+        Key::TrayFavoriteRemove => "Aktuellen Standort aus Favoriten entfernen",
+        Key::TrayFavoriteUnavailable => "Standort nicht verfügbar",
+        Key::TrayFavoriteLoading => "Wird geladen …",
+        Key::TrayLocations => "Standorte",
+        Key::ContinentEurope => "Europa",
+        Key::ContinentAsia => "Asien",
+        Key::ContinentNorthAmerica => "Nordamerika",
+        Key::ContinentSouthAmerica => "Südamerika",
+        Key::ContinentAfrica => "Afrika",
+        Key::ContinentOceania => "Ozeanien",
+        Key::TrayLocationsLoading => "Standorte werden geladen …",
+        Key::TrayLocationsMissing => "Standorte nicht verfügbar",
+        Key::TrayStreaming => "Streaming",
+        Key::TrayStreamingPlace => "{0} (Streaming)",
+        Key::TrayAutomatic => "Automatisch",
+        Key::TrayFreePlace => "{0} (kostenlos)",
+        Key::TrayAbout => "Über Celata",
+        Key::TrayQuit => "Beenden",
+        Key::UpdateAvailable => "Celata {0} ist verfügbar",
+        Key::UpdateBlockedNotice => {
+            "Das Internet ist gesperrt. Die Seite lädt, sobald das VPN verbunden oder die Sperre aufgehoben ist."
+        }
+        Key::AboutVersion => "Version {0}",
+
+        // --- Notifications (notify.rs, feature 014) ---
+        Key::NotifyConnected => "Verbunden: {0}",
+        Key::NotifyDisconnected => "Getrennt",
+        Key::NotifyLost => "Verbindung abgebrochen",
+        Key::NotifyLostBlocked => "Verbindung abgebrochen, Internet gesperrt",
+        Key::NotifyFailed => "Verbinden mit {0} gescheitert",
+        Key::NotifySwitched => "Gewechselt zu {0}",
+        Key::NotifySwitchedBack => "Wechsel gescheitert, zurück zu {0}",
+        Key::NotifyBlocked => "Internet gesperrt",
+        Key::NotifyUnblocked => "Sperre aufgehoben",
+        Key::NotifyActionFailed => "Aktion gescheitert. Einzelheiten im Fenster von Celata.",
+
+        // --- Settings of Celata, section "Application" (main.rs, feature 014) ---
+        Key::SettingsAutostartForeign => "Ein anderer Eintrag startet Celata bei der Anmeldung ({0}).",
+        Key::SettingsAutostartFailed => "Der Eintrag für den Start bei der Anmeldung ließ sich nicht ändern.",
+
+        // --- Command line (cli.rs, unblock.rs, feature 014) ---
+        Key::CliHelp => {
+            "Aufruf: celata [OPTION]\n\nOhne Option öffnet Celata sein Fenster.\n\n  --version      Gibt die Version aus.\n  --unblock      Hebt die Internet-Sperre auf, ohne das Fenster zu öffnen.\n  --polkit-rule  Gibt die Regel aus, mit der Mitglieder der Gruppe celata den Dienst starten dürfen.\n  --help         Zeigt diese Hilfe."
+        }
+        Key::CliUnknown => "Unbekannte Option: {0}. Siehe celata --help.",
+        Key::CliFreed => "Internet freigegeben.",
+        Key::CliNotBlocked => "Das Internet ist nicht gesperrt.",
+        Key::CliUnreadable => "Die Routing-Tabelle ließ sich nicht lesen, deshalb hat Celata nichts geändert.",
+        Key::CliFailed => "Die Sperre ließ sich nicht aufheben. {0}",
+        Key::CliEmergency => "Notausgang: sudo systemctl stop celata-hide.me.service",
+        Key::StateServiceStartingTitle => "Dienst wird gestartet …",
+        Key::StateServiceStartingText => {
+            "Celata startet den hide.me-Dienst. Nach dem Anmelden kann das einige Sekunden dauern, bis das Netzwerk \
+             bereit ist."
+        }
+        Key::StateServiceStartingBlockedTitle => "Dienst wird gestartet, Internet gesperrt",
+        Key::StateServiceStartingBlockedText => {
+            "Celata startet den hide.me-Dienst. Der Kill-Switch sperrt dein Internet weiter; Celata hebt die Sperre \
+             nicht von selbst auf."
+        }
+        Key::StateServiceUnreachableAutoText => {
+            "Der hide.me-Dienst läuft nicht. Celata startet ihn, sobald du verbindest."
+        }
+        Key::StartNeedsPasswordTitle => "Dienst konnte nicht gestartet werden",
+        Key::StartNeedsPasswordText => {
+            "Celata darf den hide.me-Dienst auf diesem Rechner nicht ohne Passwort starten. Klicke auf „Dienst \
+             starten“, dann fragt das System nach dem Administrator-Passwort."
+        }
+        Key::StartNotInstalledTitle => "Dienst nicht eingerichtet",
+        Key::StartNotInstalledText => {
+            "Der hide.me-Dienst für Celata ist auf diesem Rechner nicht eingerichtet. Installiere das Celata-Paket oder \
+             folge der Anleitung zur Einrichtung."
+        }
+        Key::StartFailedText => {
+            "Der hide.me-Dienst wurde gestartet, hat aber gleich wieder aufgehört. Häufige Gründe: Der hide.me-Client \
+             fehlt oder hat noch keinen Access-Token. Die letzten Meldungen des Dienstes zeigt dieser Befehl:"
+        }
+        Key::StartNoPromptNotice => {
+            "Das System konnte nicht nach dem Passwort fragen. Starte den Dienst in der Konsole:"
+        }
+        Key::SetupGuideBlockedNotice => {
+            "Das Internet ist gesperrt. Die Anleitung öffnet sich, sobald die Sperre aufgehoben ist oder eine \
+             VPN-Verbindung besteht."
+        }
+        Key::StartFailedTitle => "Dienst startet nicht",
         // END OF KEYS (marker: add new texts before this line)
     }
 }

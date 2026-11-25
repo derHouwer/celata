@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 derHouwer
+//
+// Lets members of the group "celata" start the hide.me service for Celata without a password, in an active
+// session at this computer. Only starting this one unit: stopping, restarting, enabling or disabling it and
+// every other unit keep the usual rules of the system.
+
+polkit.addRule(function (action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") === "celata-hide.me.service" &&
+        action.lookup("verb") === "start" &&
+        subject.local && subject.active &&
+        subject.isInGroup("celata")) {
+        return polkit.Result.YES;
+    }
+});

@@ -5,18 +5,19 @@
 // The texts come from `src/state.rs`, `src/servers.rs` and `src/look.rs`; only the presentation is here.
 // Colours are only in `theme.slint`.
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import {
-    Card, CommandBox, ConfirmDialog, DonationCard, DonationTexts, NavItem, PrimaryButton, SecondaryButton, StatusDot,
-    Toast,
+    AppearanceButton, Card, CommandBox, ConfirmDialog, DonationCard, DonationTexts, NavItem, PrimaryButton,
+    SecondaryButton, StatusDot, Toast,
 } from "widgets.slint";
-import { LocationsView, ServerRow } from "locations.slint";
-import { DetailsRow, HintRow, OverviewView } from "overview.slint";
+import { LocationItem, LocationsView } from "locations.slint";
+import { DetailsRow, FavoriteItem, HintRow, OverviewView } from "overview.slint";
 import { CategoryRow, SettingsErrors, SettingsForm, SettingsView } from "settings.slint";
 
 // `src/main.rs` needs the types as `celata_ui::…`.
-export { ServerRow, SettingsForm, SettingsErrors, CategoryRow, HintRow, DetailsRow, DonationTexts }
+export { LocationItem, FavoriteItem, SettingsForm, SettingsErrors, CategoryRow, HintRow, DetailsRow, DonationTexts }
+export { CelataTray, TrayPlace, TrayCountry, TraySlot } from "tray.slint";
 
 // Question before applying (`confirm`)
 export struct ConfirmRow {
@@ -29,7 +30,10 @@ export struct ConfirmRow {
 
 export component MainWindow inherits Window {
     title: "Celata";
-    icon: @image-url("icons/celata.svg");
+    // Logo in the colour of the connection state, set from Rust. It takes effect under X11; under Wayland only
+    // once Slint uses winit 0.31. Until the first state the blue logo applies.
+    in property <image> state-icon: @image-url("icons/celata.svg");
+    icon: root.state-icon;
     preferred-width: 880px;
     // High enough that the card "Connection" is visible without scrolling while connected
     preferred-height: 780px;
@@ -72,8 +76,12 @@ export component MainWindow inherits Window {
     // Right area of the main button: "route", "unblock" or "none"
     in property <string> main-side: "none";
     in property <string> main-side-label;
+    // Colour of the connection state from `look::state_color`: "normal", "connected" or "blocked"
+    in property <string> state-color: "normal";
     in property <string> location-label;
     in property <image> location-flag;
+    // "Best location" in the card "Location": the Celata logo instead of the flag (feature 013)
+    in property <bool> location-best;
 
     // Unblock internet
     in property <bool> unblock-asked;
@@ -86,10 +94,20 @@ export component MainWindow inherits Window {
     in property <string> dialog-keep-label;
     in property <string> dialog-command;
 
-    // Server list
-    in property <[ServerRow]> servers;
+    // Server list: rows from `look::location_items`. Rust keeps one model for the whole run and replaces only
+    // the rows that changed, so that the list keeps its scroll position.
+    in property <[LocationItem]> servers;
     // Streaming servers, set from `src/main.rs` according to `src/streaming.rs`
-    in property <[ServerRow]> streaming-servers;
+    in property <[LocationItem]> streaming-servers;
+    // "Favorite locations" in the overview, from `look::favorite_items`
+    in property <[FavoriteItem]> favorites;
+    // Star: switch a favourite (never selects or connects)
+    callback toggle-favorite(string);
+    // Arrow, or click on a country without "Automatic": fold or unfold
+    callback toggle-country(string);
+    // Scroll positions of both lists (`ListView.content-y`); Rust keeps the visible rows in place
+    in-out property <length> servers-scroll;
+    in-out property <length> streaming-scroll;
     // "loading", "ready" or "error"
     in property <string> list-state: "loading";
     in property <string> list-message;
@@ -126,6 +144,18 @@ export component MainWindow inherits Window {
     in property <[string]> language-names;
     in property <int> language-index;
     callback language-chosen(int);
+    // Section "Application" of the settings, set and saved by Rust.
+    in property <bool> notifications: true;
+    in property <bool> keep-running;
+    in property <bool> autostart;
+    in property <bool> autostart-foreign;
+    in property <string> autostart-note;
+    in property <bool> tray-shown: true;
+    in property <bool> update-check;
+    callback notifications-toggled(bool);
+    callback keep-running-toggled(bool);
+    callback autostart-toggled(bool);
+    callback update-check-toggled(bool);
     // Link for copying in the info message if the browser could not be opened
     in property <string> toast-link;
     // Rust sets all texts before the first picture in the stored language (`apply_language`).
@@ -133,6 +163,14 @@ export component MainWindow inherits Window {
     callback donate();
     // Switch "Show donation hint" toggled; Rust saves and sets `donation-hint`
     callback donation-hint-toggled(bool);
+
+    // Appearance (light or dark). `Palette.color-scheme` is the only place that holds it: it drives the colours
+    // of `Theme` as well as the built-in controls. Rust calls this before the window is shown, with the stored
+    // value; the button in the header calls it and then reports the new value for saving.
+    public function set-appearance(dark: bool) {
+        Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    callback appearance-toggled(bool);
 
     callback setting-toggled(string, bool);
     callback setting-choice(string, string);
@@ -156,6 +194,22 @@ export component MainWindow inherits Window {
     callback unblock-cancel();
     // Selection in the list changed: Rust sets the location of the overview anew
     callback selection-changed(string);
+    // Dialog "About Celata", opened from the menu of the tray icon; "Version <number>" comes from Rust.
+    in-out property <bool> about-open;
+    in property <string> about-version;
+    // "Project page": Rust opens the fixed address with `xdg-open`.
+    callback open-project();
+    // Hint about a new version in the overview; empty without one.
+    in property <string> update-text;
+    callback open-update();
+    // Start of the service in the status card (`StatusView`)
+    in property <bool> start-button-visible;
+    in property <bool> start-button-busy;
+    in property <bool> fix-rule-visible;
+    in property <string> fix-rule-command;
+    in property <bool> guide-link-visible;
+    callback start-service-clicked();
+    callback setup-guide-clicked();
     // Only in the user interface: open "Locations"
     callback open-locations();
     open-locations => {
@@ -170,8 +224,8 @@ export component MainWindow inherits Window {
 
             HorizontalLayout {
                 padding-left: 16px;
+                padding-right: 8px;
                 spacing: 10px;
-                alignment: start;
 
                 VerticalLayout {
                     alignment: center;
@@ -189,6 +243,21 @@ export component MainWindow inherits Window {
                     font-weight: 600;
                     color: Theme.on-dark;
                     vertical-alignment: center;
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                // First stop of the Tab key: it comes before the sidebar in the tree.
+                VerticalLayout {
+                    alignment: center;
+                    AppearanceButton {
+                        clicked => {
+                            root.set-appearance(!Theme.is-dark);
+                            root.appearance-toggled(Theme.is-dark);
+                        }
+                    }
                 }
             }
         }
@@ -301,11 +370,17 @@ export component MainWindow inherits Window {
                             tone: root.tone;
                             switching: root.switching;
                             can-disconnect: root.can-disconnect;
-                            selected-host: root.selected-host;
+                            selected-host <=> root.selected-host;
+                            selected-name <=> root.selected-name;
+                            can-connect: root.can-connect;
+                            can-switch: root.can-switch;
+                            connected-host: root.connected-host;
+                            favorites: root.favorites;
                             main-label: root.main-label;
                             main-action: root.main-action;
                             location-label: root.location-label;
                             location-flag: root.location-flag;
+                            location-best: root.location-best;
                             hints: root.hints;
                             details: root.details;
                             main-side: root.main-side;
@@ -313,6 +388,7 @@ export component MainWindow inherits Window {
                             // The only combination in the user interface: state and settings live in Rust
                             // behind separate locks.
                             side-available: root.main-side != "route" || root.settings.kill-switch;
+                            state-color: root.state-color;
                             route-hint: root.route-hint;
                             route-request => {
                                 root.route-request();
@@ -328,6 +404,27 @@ export component MainWindow inherits Window {
                             }
                             open-locations => {
                                 root.open-locations();
+                            }
+                            toggle-favorite(host) => {
+                                root.toggle-favorite(host);
+                            }
+                            selection-changed(host) => {
+                                root.selection-changed(host);
+                            }
+                            update-text: root.update-text;
+                            open-update => {
+                                root.open-update();
+                            }
+                            start-button-visible: root.start-button-visible;
+                            start-button-busy: root.start-button-busy;
+                            fix-rule-visible: root.fix-rule-visible;
+                            fix-rule-command: root.fix-rule-command;
+                            guide-link-visible: root.guide-link-visible;
+                            start-service-clicked => {
+                                root.start-service-clicked();
+                            }
+                            setup-guide-clicked => {
+                                root.setup-guide-clicked();
                             }
                         }
                     }
@@ -354,6 +451,25 @@ export component MainWindow inherits Window {
                             language-index: root.language-index;
                             language-chosen(index) => {
                                 root.language-chosen(index);
+                            }
+                            notifications: root.notifications;
+                            keep-running: root.keep-running;
+                            autostart: root.autostart;
+                            autostart-foreign: root.autostart-foreign;
+                            autostart-note: root.autostart-note;
+                            tray-shown: root.tray-shown;
+                            update-check: root.update-check;
+                            notifications-toggled(on) => {
+                                root.notifications-toggled(on);
+                            }
+                            keep-running-toggled(on) => {
+                                root.keep-running-toggled(on);
+                            }
+                            autostart-toggled(on) => {
+                                root.autostart-toggled(on);
+                            }
+                            update-check-toggled(on) => {
+                                root.update-check-toggled(on);
                             }
                             donation-hint-toggled(on) => {
                                 root.donation-hint-toggled(on);
@@ -408,6 +524,8 @@ export component MainWindow inherits Window {
                         selected-name <=> root.selected-name;
                         tab <=> root.locations-tab;
                         free-only <=> root.free-only;
+                        servers-scroll <=> root.servers-scroll;
+                        streaming-scroll <=> root.streaming-scroll;
                         free-only-changed(on) => {
                             root.free-only-changed(on);
                         }
@@ -425,6 +543,12 @@ export component MainWindow inherits Window {
                         }
                         selection-changed(host) => {
                             root.selection-changed(host);
+                        }
+                        toggle-favorite(host) => {
+                            root.toggle-favorite(host);
+                        }
+                        toggle-country(code) => {
+                            root.toggle-country(code);
                         }
                     }
                 }
@@ -523,6 +647,104 @@ export component MainWindow inherits Window {
         }
     }
 
+    // --- About Celata ---
+    // Same make as the question on closing; the texts are single lines. Escape closes it as well.
+    if root.about-open: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Theme.scrim;
+
+        // Catch clicks on the window behind
+        TouchArea { }
+
+        FocusScope {
+            init => {
+                self.focus();
+            }
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.about-open = false;
+                    return accept;
+                }
+                reject
+            }
+
+            Card {
+                width: min(parent.width - 32px, 420px);
+                height: about-layout.preferred-height;
+                drop-shadow-blur: 12px;
+                drop-shadow-color: Theme.shadow-dialog;
+
+                about-layout := VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
+
+                    Text {
+                        text: @tr("About Celata");
+                        font-size: 18px;
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 14px;
+                        alignment: start;
+
+                        Image {
+                            source: @image-url("icons/celata.svg");
+                            width: 48px;
+                            height: 48px;
+                            accessible-role: none;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+
+                            Text {
+                                text: "Celata";
+                                font-size: 16px;
+                                font-weight: 600;
+                                color: Theme.text;
+                            }
+
+                            Text {
+                                text: root.about-version;
+                                font-size: 14px;
+                                color: Theme.text;
+                            }
+
+                            Text {
+                                text: @tr("License: GPL-3.0-only");
+                                font-size: 14px;
+                                color: Theme.text;
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        SecondaryButton {
+                            text: @tr("Project page");
+                            clicked => {
+                                root.open-project();
+                            }
+                        }
+
+                        PrimaryButton {
+                            text: @tr("Close");
+                            icon-field: false;
+                            clicked => {
+                                root.about-open = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // --- Warning before unblocking the internet ---
     if root.unblock-asked: Rectangle {
         width: 100%;
@@ -535,7 +757,7 @@ export component MainWindow inherits Window {
             width: min(parent.width - 32px, 420px);
             height: unblock-layout.preferred-height;
             border-width: 2px;
-            border-color: Theme.tone-alert;
+            border-color: Theme.alert-fg;
             drop-shadow-blur: 12px;
             drop-shadow-color: Theme.shadow-dialog;
 
@@ -547,7 +769,7 @@ export component MainWindow inherits Window {
                     text: @tr("Unblock internet?");
                     font-size: 18px;
                     font-weight: 600;
-                    color: Theme.tone-alert;
+                    color: Theme.alert-fg;
                 }
 
                 Text {

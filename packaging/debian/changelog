@@ -1,3 +1,16 @@
+celata (0.9.0-1) unstable; urgency=medium
+
+  * The state of the connection in colour, an icon with a menu in the system
+    tray and optional desktop notifications.
+  * Locations by country, favorite locations and an automatic "Best
+    location".
+  * Light and dark appearance.
+  * Celata starts the hide.me service itself (rule for polkit in the package).
+  * Optional check for new versions (off by default).
+  * Setup script and Linux Mint 22 as a tested system.
+
+ -- derHouwer <355941224+derHouwer@users.noreply.github.com>  Thu, 26 Nov 2026 12:00:00 +0100
+
 celata (0.8.1-1) unstable; urgency=medium
 
   * First public version.

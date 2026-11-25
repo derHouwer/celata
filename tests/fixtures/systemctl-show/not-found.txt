@@ -1,0 +1,6 @@
+WorkingDirectory=
+ReadWritePaths=
+LoadState=not-found
+ActiveState=inactive
+FragmentPath=
+DropInPaths=
